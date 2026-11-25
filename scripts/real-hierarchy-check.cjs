@@ -4,12 +4,12 @@
 // Uses some of your Claude and Codex plans. Usage: npm run build && node scripts/real-hierarchy-check.cjs <outDir> [--reject-once]
 // --reject-once: the task asks the planner to send its first final review back (CHANGES NEEDED), to run the loop back
 // through Fix and Codex's review; the restart part is skipped.
-// --revise-and-models: sets the planner's model to Sonnet 5.5 on the bar and restarts the table, sends the plan back with
+// --revise-and-models: sets the planner's model (Seat 2) to Sonnet 5.5 in the Seats panel, sends the plan back with
 // a change, approves the revised plan, stops once Codex reviews, and reads Claude Code's transcripts for the models used.
 const fs = require('node:fs'); const os = require('node:os'); const path = require('node:path'); const { execFileSync } = require('node:child_process');
 const repo = path.resolve(__dirname, '..');
 const { _electron } = require(path.join(repo, 'node_modules/playwright-core'));
-const { startTable, tileControl } = require('./lib/navigate.cjs');
+const { startTable } = require('./lib/navigate.cjs');
 const { removeFolder } = require('./lib/cleanup.cjs');
 const { NO_DRIVE } = require('./lib/no-drive.cjs');
 const out = path.resolve(process.argv[2] ?? 'real-hierarchy'); const rejectOnce = process.argv.includes('--reject-once'); const reviseAndModels = process.argv.includes('--revise-and-models'); fs.mkdirSync(out, { recursive: true });
@@ -41,15 +41,14 @@ async function until(page, test, minutes, label) {
     await page.waitForSelector('.chain-bar', { timeout: 240000 }); await shot(page, '01-open'); note('open', { bar: await bar(page) });
     const box = page.getByRole('textbox', { name: 'Message to the Round Table' });
     if (reviseAndModels) {
-      // The planner's model, changed on the bar, is used once the table starts again.
-      // Models change while the channel is stopped (a running seat keeps its model).
-      const tile = page.locator('.session-tile').filter({ hasText: 'Round Table' }); await (await tileControl(tile, 'Stop')).click(); await page.waitForTimeout(3000);
-      // In a tile too short for the whole bar, Models is behind the bar's disclosure.
-      const fold = page.locator('.chain-bar .chain-fold-toggle'); if (await fold.isVisible()) await fold.click();
-      await page.locator('.chain-models summary').click(); const field = page.getByLabel('Planner model'); await field.waitFor(); await page.waitForFunction(() => !document.querySelector('[aria-label="Planner model"]')?.disabled, null, { timeout: 30000 }).catch(() => {});
-      await field.fill('claude-sonnet-5-5'); await field.press('Tab'); note('model-set', { label: await page.locator('.chain-models').innerText() });
-      // A stopped channel offers Restart in its detail row.
-      await (await tileControl(tile, 'Restart')).click();
+      // The planner's model, changed in the Seats panel (1.26: the bar's Models fold is gone): Seat 2 plans in the built-in
+      // hierarchy. A model change restarts that seat; the table then asks for a task again.
+      const seatsButton = page.locator('.chain-bar').getByRole('button', { name: 'Seats', exact: true }); await seatsButton.waitFor(); await page.waitForFunction(() => [...document.querySelectorAll('.chain-bar button')].some((button) => button.textContent?.trim() === 'Seats' && !button.disabled), null, { timeout: 60000 });
+      await seatsButton.click(); const panel = page.locator('dialog.table-setup'); await panel.waitFor();
+      const picked = await panel.getByLabel('Seat 2 model', { exact: true }).selectOption('claude-sonnet-5-5').then(() => true, () => false);
+      if (!picked) await panel.getByLabel('Seat 2 model ID', { exact: true }).fill('claude-sonnet-5-5');
+      note('model-set', { duties: await panel.getByRole('group', { name: 'Seat 2 duties' }).innerText().catch(() => ''), picked });
+      await panel.getByRole('button', { name: 'Apply', exact: true }).click(); await panel.waitFor({ state: 'detached', timeout: 120000 });
       await page.waitForFunction(() => document.querySelector('.chain-bar .table-status')?.textContent?.includes('Give it a task'), null, { timeout: 240000 }); note('restarted', { bar: await bar(page) });
       await box.fill('Create hello.txt containing the word hello.'); await box.press('Enter');
       let r = await until(page, (text) => /plan is ready/i.test(text), 10, 'plan'); note('plan', r); await shot(page, '02-plan');

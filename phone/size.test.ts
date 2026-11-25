@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { atPhoneSize, takenBack } from './size';
+import { atPhoneSize, replayAsks, takenBack } from './size';
 
 describe('a terminal channel opened on the phone', () => {
   it('shows its text at the chosen size while the phone\'s request is on its way, not only once the computer has answered', () => {
@@ -17,5 +17,9 @@ describe('a terminal channel opened on the phone', () => {
     expect(takenBack(true, true, true, true)).toBe(false);
     expect(takenBack(true, false, true, false)).toBe(false);
     expect(takenBack(true, true, false, false)).toBe(false);
+  });
+  it('asks for the phone size on a channel just opened or restarted, never on a replay after a reconnect (1.43.0)', () => {
+    expect(replayAsks(true, false)).toBe(true); expect(replayAsks(false, true)).toBe(true);
+    expect(replayAsks(false, false)).toBe(false);
   });
 });

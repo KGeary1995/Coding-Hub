@@ -4,12 +4,15 @@ import path from 'node:path';
 import type { AccountConnection, AccountProvider } from '../../../shared/accounts';
 import { freshHostEnvironment, findExecutable, probeCLI, checkAuthentication, type Executable } from './discovery';
 import { HubError } from './engine-adapter';
-export const INSTALL_GUIDES: Record<AccountProvider, string> = {
+/** Gemini (agy) has none here: Trace has no install page for it that was checked. */
+export const INSTALL_GUIDES: Record<AccountProvider, string | null> = {
   claude: 'https://code.claude.com/docs/en/setup',
   codex: 'https://developers.openai.com/codex/cli/',
+  gemini: null,
   github: 'https://cli.github.com/',
 };
-export const LOGIN_ARGUMENTS: Record<AccountProvider, string[]> = { claude: ['auth', 'login'], codex: ['login'], github: ['auth', 'login', '--hostname', 'github.com', '--web', '--git-protocol', 'https'] };
+/** agy has no login command: started plainly, it asks to sign in when it is not. */
+export const LOGIN_ARGUMENTS: Record<AccountProvider, string[]> = { claude: ['auth', 'login'], codex: ['login'], gemini: [], github: ['auth', 'login', '--hostname', 'github.com', '--web', '--git-protocol', 'https'] };
 export function githubAuthentication(stdout: string, stderr: string, exitCode: number | null): AccountConnection['state'] {
   // gh lists every stored account; judge only the active one so a stale secondary token does not mask a working login.
   const all = stdout + '\n' + stderr; const blocks = all.split(/\n(?=\s*[✓X!]\s)/); const active = blocks.find((block) => /active account:\s*true/i.test(block));
@@ -42,10 +45,13 @@ export async function inspectAccount(provider: AccountProvider, environment?: Re
       connection.message = connection.state === 'authenticated' ? 'GitHub CLI reports a configured login for github.com.' : connection.state === 'not-authenticated' ? 'Sign in to GitHub using its browser login flow.' : 'GitHub authentication could not be verified. Check connectivity or sign in again.';
       connection.canLogin = /^\s*auth\b/m.test(helpText);
     } else {
-      const authentication = await checkAuthentication(provider, executable, helpText, env);
+      // The version decides whether agy can answer /usage itself (discovery's GEMINI_USAGE_COMMAND); without it Gemini stayed unknown.
+      const authentication = await checkAuthentication(provider, executable, helpText, env, connection.version);
       connection.state = authentication.state; connection.message = authentication.message;
-      connection.canLogin = new RegExp(`^\\s*${provider === 'claude' ? 'auth' : 'login'}\\b`, 'm').test(helpText);
-      if (!connection.canLogin) connection.message += ' This version does not advertise the supported login command. Update the CLI or sign in from your system terminal.';
+      // agy signs in when it starts (it has no login command); its setup asks which account and billing to use.
+      connection.canLogin = provider === 'gemini' || new RegExp(`^\\s*${provider === 'claude' ? 'auth' : 'login'}\\b`, 'm').test(helpText);
+      if (provider === 'gemini' && connection.state !== 'authenticated') connection.message = `${connection.state === 'not-authenticated' ? 'Gemini is not signed in.' : 'Gemini did not report a sign-in.'} Connect starts it to sign in: choose your Google account, then the free or individual option. Google Cloud and Pay As You Go ask for a Cloud project, and quitting at that step leaves Gemini signed out.`;
+      else if (!connection.canLogin) connection.message += ' This version does not advertise the supported login command. Update the CLI or sign in from your system terminal.';
     }
     return { connection, executable };
   } catch (error) { connection.message = error instanceof HubError ? error.message : 'The CLI could not be inspected. Install it and refresh.'; return { connection, executable: null }; }

@@ -480,9 +480,12 @@ const { NO_DRIVE } = require('./lib/no-drive.cjs');
     const invalidLog = await page.evaluate(() => window.codingHub.readRunLog({ runId: '../../other' }));
     assert.equal(invalidLog.ok, false);
     await page.getByRole('button', { name: 'Back to channels', exact: true }).click();
-    // + Channel lists Terminal, Claude Code, Codex, Gemini, their chats, then both Round Tables (two channels are open, so both fit).
+    // + Channel (1.43.0): Terminal, one row each for Claude Code, Codex and Gemini with CLI and Chat, then Round Table with
+    // Discussion and Hierarchy (two channels are open, so a table fits). Each choice keeps its full name.
     await page.getByRole('button', { name: 'New channel', exact: true }).click();
-    assert.deepEqual(await page.getByRole('menuitem').allTextContents(), ['Terminal', 'Claude Code', 'Codex', 'Gemini', 'Claude Code chat', 'Codex chat', 'Gemini chat', 'Round Table', 'Round Table (hierarchy)']);
+    assert.deepEqual(await page.locator('.tr-new-channel [role="group"]').evaluateAll((rows) => rows.map((row) => row.getAttribute('aria-label'))), ['Claude Code', 'Codex', 'Gemini', 'Round Table']);
+    assert.deepEqual(await page.getByRole('menuitem').allTextContents(), ['Terminal', 'CLI', 'Chat', 'CLI', 'Chat', 'CLI', 'Chat', 'Discussion', 'Hierarchy']);
+    assert.deepEqual(await page.getByRole('menuitem').evaluateAll((items) => items.map((item) => item.getAttribute('aria-label') ?? item.textContent)), ['Terminal', 'Claude Code', 'Claude Code chat', 'Codex', 'Codex chat', 'Gemini', 'Gemini chat', 'Round Table', 'Round Table (hierarchy)']);
     await page.keyboard.press('Escape');
     // Deliberately close immediately after a layout change; the host requests a final snapshot.
     await page.getByRole('button', { name: 'Split horizontally: rows', exact: true }).click();

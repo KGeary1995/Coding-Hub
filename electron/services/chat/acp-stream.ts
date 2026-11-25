@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { TOOL_RESULT_LIMIT, type ChatEvent, type ChatHistoryMessage, type ChatImage } from '../../../shared/chat';
 import type { ChatStream } from './claude-stream';
 import type { PermissionLevel } from '../../../shared/types';
@@ -144,6 +145,19 @@ export class AcpStream implements ChatStream {
     if (!Array.isArray(options)) return;
     for (const option of options) { const item = record(option); const value = text(item.currentValue); if (item.id === 'model') this.config.model = value; else if (item.id === 'thought_level') this.config.level = value; else if (item.id === 'mode') this.config.mode = value; }
   }
+  /** Mode changes the agent made by itself since the last turn, each answered by asking for the run's mode again. */
+  private drifts = 0;
+  /**
+   * The agent changed its mode by itself (a resumed session's saved mode, or a plan it was let out of). Between turns the
+   * run's mode is asked for again: before 1.43.0 nothing asked, and every later message waited for a mode that never came.
+   * A turn's end asks anyway. At most three in a row before a turn; then the run says why it stopped. agy's reports are
+   * the confirmations GeminiStream waits for, so for it they are only checked, as before.
+   */
+  private modeChanged() {
+    if (this.agent.agy || this.turn.busy || this.asked !== null || this.confirmed()) { this.check(); return; }
+    if (++this.drifts > 3) return this.fail(`${this.agent.name} keeps changing its mode by itself (now ${this.config.mode || 'unknown'}), so Trace does not use it. Restart the channel.`);
+    this.applyMode();
+  }
   /** Ready once the session confirms the model and mode (and again after each change of mode); then the messages written meanwhile go. */
   private check() {
     if (this.failed || !this.sessionId || this.asked !== null || !this.confirmed()) return;
@@ -168,7 +182,7 @@ export class AcpStream implements ChatStream {
     // An agent that does not take images gets the text, and the thread says so.
     if (images.length && !this.offers.images) { this.emit({ type: 'notice', text: `${this.agent.name} does not take images, so only the text was sent.` }); images = []; if (!message) { this.emit({ type: 'done', isError: true, error: `${this.agent.name} does not take images.` }); return; } }
     const prompt = [...images.map((image) => ({ type: 'image', mimeType: image.mediaType, data: image.data })), ...(message ? [{ type: 'text', text: message }] : [])];
-    this.turn = { busy: true, count: this.turn.count + 1, messageId: '', text: '', thinking: '', segment: 0 };
+    this.turn = { busy: true, count: this.turn.count + 1, messageId: '', text: '', thinking: '', segment: 0 }; this.drifts = 0;
     const count = this.turn.count;
     this.request('session/prompt', { sessionId: this.sessionId, prompt }, (response) => {
       if (count !== this.turn.count) return;
@@ -224,7 +238,13 @@ export class AcpStream implements ChatStream {
     if (blocks.length) this.emit({ type: 'assistant', messageId: this.messageId(), blocks });
     this.turn.text = ''; this.turn.thinking = ''; this.turn.messageId = ''; this.turn.segment++;
   }
-  private messageId() { if (!this.turn.messageId) this.turn.messageId = `${this.agent.prefix}-${this.sessionId ?? 'session'}-${this.turn.count}-${this.turn.segment}`; return this.turn.messageId; }
+  /**
+   * This run's own part of every reply's id. A restart loads the same session and counts turns from 1 again, so before
+   * 1.43.0 its first reply had the id of the first reply before the restart: the window joined it to that old message
+   * (and dropped it when the text was the same), and the reply never showed.
+   */
+  private readonly run = randomUUID().slice(0, 8);
+  private messageId() { if (!this.turn.messageId) this.turn.messageId = `${this.agent.prefix}-${this.sessionId ?? 'session'}-${this.run}-${this.turn.count}-${this.turn.segment}`; return this.turn.messageId; }
 
   private handle(message: Record<string, unknown>) {
     const method = text(message.method);
@@ -236,7 +256,7 @@ export class AcpStream implements ChatStream {
     if (method !== 'session/update') return;
     const update = record(record(message.params).update); const kind = text(update.sessionUpdate);
     if (kind === 'config_option_update') { this.readConfig(update.configOptions); this.check(); return; }
-    if (kind === 'current_mode_update') { this.config.mode = text(update.currentModeId) || this.config.mode; this.check(); return; }
+    if (kind === 'current_mode_update') { this.config.mode = text(update.currentModeId) || this.config.mode; this.modeChanged(); return; }
     if (this.replay && (kind === 'user_message_chunk' || kind === 'agent_message_chunk')) { this.replayed(kind === 'user_message_chunk' ? 'user' : 'assistant', text(record(update.content).text)); return; }
     if (!this.turn.busy) return;
     if (kind === 'agent_message_chunk') { const piece = text(record(update.content).text); if (piece) { this.turn.text += piece; this.emit({ type: 'delta', messageId: this.messageId(), text: piece }); } return; }

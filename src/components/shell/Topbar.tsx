@@ -11,7 +11,7 @@ import { channelsFullNote, channelsOf, useWorkspaceStore, type NavigationView } 
 import { CommandMenu } from '../CommandMenu';
 import { StartOrderButton } from './StartOrderButton';
 import { shownViews, useAdvanced } from '../../state/simple-mode';
-import { MenuButton, type MenuItem } from './MenuButton';
+import { MenuButton, type MenuChoice, type MenuItem } from './MenuButton';
 import { TraceMark } from './TraceMark';
 import { ENGINE_ICONS } from '../tile/engine-icons';
 import { MAX_CHANNELS } from '../../../shared/schemas';
@@ -37,6 +37,8 @@ const CHANNEL_KINDS = {
   table: { label: 'Round Table', icon: UsersRound, tone: 'you' }, hierarchy: { label: 'Round Table (hierarchy)', icon: Network, tone: 'planner' },
 } as const;
 const channelItem = (kind: keyof typeof CHANNEL_KINDS, onSelect: () => void): MenuItem => { const { label, icon: Icon, tone } = CHANNEL_KINDS[kind]; return { label, icon: <span className={`ui-avatar small ${tone}`} aria-hidden="true"><Icon /></span>, onSelect }; };
+/** One row for a kind that comes in two ways: each choice keeps the full name the menu used to list it by. */
+const channelRow = (item: MenuItem, choices: MenuChoice[]): MenuItem => ({ ...item, onSelect: choices[0].onSelect, choices });
 
 /** Opens the native folder picker; the browser preview uses the typed path in Projects. */
 export async function openProjectFolder() {
@@ -73,7 +75,8 @@ export function Topbar({ explorer, onToggleExplorer }: { explorer: boolean; onTo
   const setupActive = SETUP_VIEWS.some((item) => item.view === activeView);
   // Each channel is its own CLI process; past four, say so where the next one is added.
   // On a linked computer's tab, + Channel adds the channel on that computer (chat channels are answered only there).
-  // The order is the person's: Terminal, Claude Code, Codex, Gemini, their chats, then the Round Tables (on the phone too).
+  // The order is the person's: Terminal, Claude Code, Codex, Gemini, the agents they added, then Round Table (on the phone
+  // too). Since 1.43.0 each agent is one row with CLI and Chat, and Round Table one row with Discussion and Hierarchy.
   const other = activeView === 'computer' ? linkedComputers.find((item) => item.id === computerId) : undefined;
   // The tiles of the plugins that are on (docs/plugins.md), read again when the view changes (after Skills & plugins).
   const [tiles, setTiles] = useState<{ plugin: string; tile: string; title: string; name: string }[]>([]);
@@ -87,15 +90,19 @@ export function Topbar({ explorer, onToggleExplorer }: { explorer: boolean; onTo
   const addPluginTile = useWorkspaceStore((state) => state.addPluginTile);
   const channelMenu: MenuItem[] = other
     ? [...(['shell', 'claude', 'codex', 'gemini'] as const).map((engine) => channelItem(engine, () => void addLinkedChannel(other.id, engine))),
-      ...otherAgents.map((agent): MenuItem => ({ label: agent.name, icon: <span className="ui-avatar small custom" style={{ '--tone': agent.color } as CSSProperties} aria-hidden="true">{agent.initials}</span>, onSelect: () => void addLinkedChannel(other.id, 'custom', agent.id) }))]
-    : [...(['shell', 'claude', 'codex', 'gemini'] as const).map((engine) => channelItem(engine, () => addSession(engine))),
-      // The same agents as chats (1.39.0): the conversation in Trace's own view instead of the CLI's terminal.
-      ...(['claude', 'codex', 'gemini'] as const).map((engine) => channelItem(`${engine}Chat`, () => useWorkspaceStore.getState().addChatSession(engine))),
+      // Another computer's chats are added there only, so an agent that is a chat only is not offered here.
+      ...otherAgents.filter((agent) => !agent.chatOnly).map((agent): MenuItem => ({ label: agent.name, icon: <span className="ui-avatar small custom" style={{ '--tone': agent.color } as CSSProperties} aria-hidden="true">{agent.initials}</span>, onSelect: () => void addLinkedChannel(other.id, 'custom', agent.id) }))]
+    : [channelItem('shell', () => addSession('shell')),
+      // Each agent in its terminal (CLI) or as a chat (1.39.0): the same CLI, its conversation in Trace's own view.
+      ...(['claude', 'codex', 'gemini'] as const).map((engine) => channelRow(channelItem(engine, () => addSession(engine)),
+        [{ label: 'CLI', name: CHANNEL_KINDS[engine].label, onSelect: () => addSession(engine) }, { label: 'Chat', name: CHANNEL_KINDS[`${engine}Chat`].label, onSelect: () => useWorkspaceStore.getState().addChatSession(engine) }])),
+      // The agents added on the Agents page; one that speaks ACP comes as a chat too (custom agents, phase 2).
+      ...agents.map((agent): MenuItem => { const item: MenuItem = { label: agent.look.name, icon: <EngineAvatar engine="custom" agentId={agent.id} />, onSelect: () => addSession('custom', undefined, { id: agent.id, name: agent.look.name }) };
+        // A chat only (its program is the ACP server itself): no CLI to offer.
+        if (agent.look.chatOnly) return { ...item, label: `${agent.look.name} chat`, onSelect: () => useWorkspaceStore.getState().addChatSession('custom', { id: agent.id, name: agent.look.name }) };
+        return agent.look.chat ? channelRow(item, [{ label: 'CLI', name: agent.look.name, onSelect: item.onSelect }, { label: 'Chat', name: `${agent.look.name} chat`, onSelect: () => useWorkspaceStore.getState().addChatSession('custom', { id: agent.id, name: agent.look.name }) }]) : item; }),
       // A table is at least two agents, each a channel's worth of the eight: offered while two places are free. The panel opens with that kind's built-in (or last-used) table.
-      ...agents.map((agent): MenuItem => ({ label: agent.look.name, icon: <EngineAvatar engine="custom" agentId={agent.id} />, onSelect: () => addSession('custom', undefined, { id: agent.id, name: agent.look.name }) })),
-      // Each that speaks ACP as a chat too (custom agents, phase 2), after the terminals as the built-in agents' chats are.
-      ...agents.filter((agent) => agent.look.chat).map((agent): MenuItem => ({ label: `${agent.look.name} chat`, icon: <EngineAvatar engine="custom" agentId={agent.id} />, onSelect: () => useWorkspaceStore.getState().addChatSession('custom', { id: agent.id, name: agent.look.name }) })),
-      ...(seatRoom() >= 2 ? [channelItem('table', () => setSetup('discussion')), channelItem('hierarchy', () => setSetup('hierarchy'))] : []),
+      ...(seatRoom() >= 2 ? [channelRow(channelItem('table', () => setSetup('discussion')), [{ label: 'Discussion', name: CHANNEL_KINDS.table.label, onSelect: () => setSetup('discussion') }, { label: 'Hierarchy', name: CHANNEL_KINDS.hierarchy.label, onSelect: () => setSetup('hierarchy') }])] : []),
       ...tiles.map((item): MenuItem => ({ label: `${item.title} (${item.name})`, icon: <span className="ui-avatar small shell" aria-hidden="true"><Puzzle /></span>, onSelect: () => addPluginTile({ id: item.plugin, tile: item.tile }, item.title) }))];
   return <header className="tr-topbar">
     <Wordmark />

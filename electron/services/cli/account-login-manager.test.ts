@@ -70,6 +70,14 @@ describe('account setup independent of project sessions', () => {
       await expect(manager.execute(7, { action: 'login', provider: 'codex', profileId: profile.id, cols: 80, rows: 24 })).rejects.toMatchObject({ code: 'INVALID_ACCOUNT_REQUEST' });
     } finally { await manager.close(); fs.rmSync(root, { recursive: true, force: true }); }
   });
+  it('lists Gemini (agy) with the others, signs in by starting it plainly, and has no installation page to open (1.43.0)', async () => {
+    const { manager, spawn, openGuide } = fixture();
+    expect(((await manager.execute(7, { action: 'status' })) as { provider: string }[]).map((item) => item.provider)).toEqual(['claude', 'codex', 'gemini', 'github']);
+    await manager.execute(7, { action: 'login', provider: 'gemini', cols: 80, rows: 24 }); expect(spawn.mock.calls[0][1]).toEqual([]);
+    await manager.close();
+    const other = fixture(); await expect(other.manager.execute(7, { action: 'install-guide', provider: 'gemini' })).rejects.toMatchObject({ code: 'NO_INSTALL_GUIDE' }); expect(other.openGuide).not.toHaveBeenCalled(); expect(openGuide).not.toHaveBeenCalled();
+    await other.manager.close();
+  });
   it('keeps GitHub status redacted and opens only fixed official installation guides', async () => {
     expect(githubAuthentication('', 'Logged in to github.com account private-user (keyring)\nToken: private-token', 0)).toBe('authenticated');
     expect(githubAuthentication('', 'You are not logged into any GitHub hosts', 1)).toBe('not-authenticated');

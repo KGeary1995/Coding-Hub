@@ -114,7 +114,7 @@ describe('scheduled runs', () => {
     vi.setSystemTime(local(7, 6, 8)); await vi.advanceTimersByTimeAsync(TICK_MS);
     expect(trace.opened).toHaveLength(1); const [request] = trace.opened; const [task] = trace.tasks;
     expect(request).toMatchObject({ engine: 'gemini', taskId: task.id, sessionId: task.sessionId, directory: fs.realpathSync(root), title: 'Review the code for bugs' }); expect(request.replace).toBeUndefined();
-    expect(task).toMatchObject({ title: 'Review the code for bugs', details: 'Review the code for bugs.', status: 'queued' }); expect(task.notes).toContain('Trace cannot read Gemini’s replies');
+    expect(task).toMatchObject({ title: 'Review the code for bugs', details: 'Review the code for bugs.', status: 'queued' }); expect(task.notes).toContain('Trace reads the agent’s screen for TASK COMPLETE');
     const [job] = jobs.data().jobs; expect(job.lastRun).toMatchObject({ result: 'started', taskId: task.id, sessionId: task.sessionId }); expect(job.running).toBe(true);
     // Once per due time: later ticks the same morning start nothing.
     await vi.advanceTimersByTimeAsync(TICK_MS * 4); expect(trace.opened).toHaveLength(1); jobs.stop();

@@ -287,7 +287,7 @@ export class LinkedComputers implements RemoteRelay {
   async agents(id: string): Promise<AgentLook[]> {
     const link = this.linked(id); let body: { agents?: unknown };
     try { body = await (await this.request(link, 'api/me', { signal: AbortSignal.timeout(5000) })).json() as { agents?: unknown }; } catch { return []; }
-    const listed = z.array(z.object({ id: z.string().regex(AGENT_ID), name: z.string().trim().min(1).max(40), color: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional() })).max(20).safeParse(Array.isArray(body.agents) ? body.agents.map((agent) => agent && typeof agent === 'object' ? { id: (agent as AgentLook).id, name: (agent as AgentLook).name, color: (agent as AgentLook).color } : agent) : []);
+    const listed = z.array(z.object({ id: z.string().regex(AGENT_ID), name: z.string().trim().min(1).max(40), color: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(), chatOnly: z.literal(true).optional() })).max(20).safeParse(Array.isArray(body.agents) ? body.agents.map((agent) => agent && typeof agent === 'object' ? { id: (agent as AgentLook).id, name: (agent as AgentLook).name, color: (agent as AgentLook).color, ...((agent as AgentLook).chatOnly ? { chatOnly: true as const } : {}) } : agent) : []);
     return listed.success ? listed.data.map((agent) => agentLook(agent)) : [];
   }
   /** Pastes an image (PNG or JPEG, base64) into a channel there. A Trace before 1.12.1 there answers 404. */
@@ -337,6 +337,23 @@ export class LinkedComputers implements RemoteRelay {
     const link = this.linked(id);
     try { await this.request(link, 'api/history-resume', { method: 'POST', body: JSON.stringify({ key }), signal: AbortSignal.timeout(30000) }); }
     catch (error) { if (error instanceof HubError && error.code === 'LINK_FAILED' && / 404|Not found/i.test(error.message)) throw new HubError('LINK_OLD', `Update Trace on ${link.name} to resume its conversations from here.`); throw error; }
+  }
+  /**
+   * Starts Trace there when it is closed, through its screen service (Windows, with Share this screen on), which runs from
+   * sign-in: https://<name>.ts.net/api/screen/open-trace, with this computer's link key. It starts in the tray there and
+   * the link connects by itself. Each answer that is not a start says what to do instead.
+   */
+  async openTrace(id: string) {
+    const link = this.linked(id); let response: Response;
+    try { response = await this.fetcher(new URL('api/screen/open-trace', link.url), { method: 'POST', body: '{}', headers: { Authorization: `Bearer ${link.token}`, 'Content-Type': 'application/json' }, signal: AbortSignal.timeout(15000) }); }
+    catch { throw new HubError('LINK_UNREACHABLE', `${link.name} could not be reached. Check that it is on and connected to Tailscale.`); }
+    if (response.ok) return;
+    const said = (await response.json().catch(() => ({})) as { error?: unknown }).error;
+    if (response.status === 401) throw new HubError('LINK_REVOKED', `${link.name} no longer accepts this computer. Link it again in Settings → Other computers.`);
+    // Nothing answers at that address: no screen service (a Mac, or Share this screen off), or the computer sleeps.
+    if (response.status === 502 || response.status === 503 || response.status === 504) throw new HubError('OPEN_UNAVAILABLE', `Nothing on ${link.name} could open Trace. On a Windows computer, turn on Settings → Other computers → Share this screen there once; a Mac opens Trace when you sign in. If it is asleep or off, wake it first.`);
+    if (response.status === 404) throw new HubError('LINK_OLD', `Update Trace on ${link.name} to open it from here.`);
+    throw new HubError('OPEN_REFUSED', typeof said === 'string' && said ? said.slice(0, 300) : `${link.name} did not open Trace.`);
   }
   /** A chat request (send, answer, interrupt, Round Table) for a chat channel there. A Trace there before chat routes answers 404. */
   async chat(id: string, request: ChatRequest) {

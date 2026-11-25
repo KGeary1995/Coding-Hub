@@ -10,6 +10,7 @@ const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 const { _electron } = require('playwright-core');
 const { openView } = require('./lib/navigate.cjs');
+const { NO_DRIVE } = require('./lib/no-drive.cjs');
 
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 /** Captures a rectangle of the real screen to a PNG. */
@@ -37,8 +38,9 @@ if (require.main === module) (async () => {
   const root = await realpath(await mkdtemp(path.join(os.tmpdir(), 'coding-hub-gpu-')));
   const storage = path.join(root, 'storage'); const shots = path.join(root, 'shots');
   await Promise.all([storage, shots, path.join(root, 'home')].map((directory) => mkdir(directory)));
-  const env = { ...process.env, CODING_HUB_TEST_NO_GEMINI: '1', CODING_HUB_STORAGE_DIR: storage, CLAUDE_CONFIG_DIR: path.join(root, 'claude-config'), CODEX_HOME: path.join(root, 'codex-config'), USERPROFILE: path.join(root, 'home') };
-  delete env.ELECTRON_RUN_AS_NODE;
+  // No Drive folder (the person's own must not get this test's notes), and not the crash pipe of the process that started it.
+  const env = { ...process.env, ...NO_DRIVE, CODING_HUB_STORAGE_DIR: storage, CLAUDE_CONFIG_DIR: path.join(root, 'claude-config'), CODEX_HOME: path.join(root, 'codex-config'), USERPROFILE: path.join(root, 'home') };
+  delete env.ELECTRON_RUN_AS_NODE; delete env.CHROME_CRASHPAD_PIPE_NAME;
   // No --disable-gpu or any other switch that turns hardware acceleration off.
   const args = ['--user-data-dir=' + path.join(root, 'electron-profile'), path.resolve(__dirname, '..'), '--production'];
   let app; const report = {};

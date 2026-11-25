@@ -1,4 +1,5 @@
-export type AccountProvider = 'claude' | 'codex' | 'github';
+/** Gemini is Google's Gemini CLI (`agy`), from 1.43.0. */
+export type AccountProvider = 'claude' | 'codex' | 'gemini' | 'github';
 export interface ClaudeAccountProfile { id: string; name: string; createdAt: string }
 /** What a Claude sign-in is called on its channels, and which of the account colours it gets. */
 export interface AccountLabel { name: string; tone: number }

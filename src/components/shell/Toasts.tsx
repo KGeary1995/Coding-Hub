@@ -37,9 +37,10 @@ export function noticePlace({ tiles, height, gap, barTop, top, standsRaised }: {
   const first = Math.min(...tiles.map((tile) => tile.top));
   const under = Math.max(0, ...tiles.filter((tile) => tile.top < first + gap).map((tile) => tile.rowsEnd));
   // Once they stand there: what they must end their gap above, the nearest first. The message row of the chat they
-  // stand in, or the whole of a chat that starts under them, so its Answer, Stop both and Rounds stay in reach too:
-  // half the gap is enough above that one, as the space between two tiles is there as well.
-  const next = standsRaised ? tiles.flatMap((tile) => tile.composer ? [tile.top > top ? { top: tile.top + gap / 2, bottom: tile.composer.bottom } : tile.composer] : []).filter((box) => box.bottom > top).sort((a, b) => a.top - b.top)[0] : undefined;
+  // stand in, or the whole of a chat that starts under them, so its Answer, Stop both and Rounds stay in reach too, or
+  // the header rows of a terminal that starts under them (1.43.0; before, a stack could cover the header of the terminal
+  // the person typed in): half the gap is enough above those, as the space between two tiles is there as well.
+  const next = standsRaised ? tiles.flatMap((tile) => tile.composer ? [tile.top > top ? { top: tile.top + gap / 2, bottom: tile.composer.bottom } : tile.composer] : tile.top > top ? [{ top: tile.top + gap / 2, bottom: tile.rowsEnd }] : []).filter((box) => box.bottom > top).sort((a, b) => a.top - b.top)[0] : undefined;
   const room = next && top + height > next.top - gap ? next.top - top : null;
   // 6 gaps are 72 px, a notice's title and first line: with less to show than that, none is shown.
   return { raised, under, room: room !== null && room - gap < 6 * gap ? 0 : room };
@@ -79,8 +80,10 @@ function tilesSeen(): Record<string, TileSeen | null> {
   const view = document.querySelector('.session-grid-container')?.getBoundingClientRect();
   return Object.fromEntries(channelsOf(useWorkspaceStore.getState().sessions).map((channel): [string, TileSeen | null] => {
     const tile = channelTile(channel.id); const rect = tile?.getBoundingClientRect(); if (!tile || !rect?.height || !view) return [channel.id, null];
-    // A chat's strip stands under its header, a terminal's over its first lines; an opened error strip is taller.
-    const ends = [...tile.querySelectorAll('.tr-tile-head, .session-attention, .session-error[role="alert"]')].map((row) => row.getBoundingClientRect().bottom);
+    // A chat's strip stands under its header, a terminal's over its first lines; an opened error strip is taller. A Round
+    // Table's bar too: it says that a hidden partner stopped with an error, whose notice is judged by this tile (1.43.0;
+    // before, a lead whose header showed and bar did not kept that partner's notice back with nothing saying so).
+    const ends = [...tile.querySelectorAll('.tr-tile-head, .session-attention, .session-error[role="alert"], .table-bar')].map((row) => row.getBoundingClientRect().bottom);
     return [channel.id, { need: { top: Math.round(rect.top), bottom: Math.round(Math.min(rect.bottom, Math.max(rect.top, ...ends))) }, view: { top: Math.round(view.top), bottom: Math.round(view.bottom) } }];
   }));
 }

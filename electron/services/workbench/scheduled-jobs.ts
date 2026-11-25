@@ -161,7 +161,7 @@ export class ScheduledJobs {
         return record({ at: when, result: 'skipped', note: `Skipped: all ${MAX_CHANNELS} channels were in use.`, taskId: task.id });
       }
       const sessionId = randomUUID(); let task: Task;
-      try { task = await this.host.addTask({ ...base, sessionId, notes: `Scheduled run of “${item.name}”, ${localTime(at)}.${item.engine === 'gemini' ? ' Trace cannot read Gemini’s replies: read its channel, then move this task on.' : item.engine === 'custom' ? ' Trace reads the agent’s screen for TASK COMPLETE; if it does not say so, read its channel, then move this task on.' : ''}` }); }
+      try { task = await this.host.addTask({ ...base, sessionId, notes: `Scheduled run of “${item.name}”, ${localTime(at)}.${item.engine === 'gemini' || item.engine === 'custom' ? ' Trace reads the agent’s screen for TASK COMPLETE; if it does not say so, read its channel, then move this task on.' : ''}` }); }
       catch (error) { return record({ at: when, result: 'failed', note: `Did not start: ${error instanceof HubError ? error.message : 'its task could not be saved.'}` }); }
       this.update(item.id, (current) => ({ ...current, active: { taskId: task.id, sessionId } }));
       try { await this.host.open({ taskId: task.id, sessionId, engine: item.engine, ...(item.agent ? { agent: item.agent } : {}), directory: task.directory, title: item.name, ...(replace ? { replace } : {}) }); }

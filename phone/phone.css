@@ -179,6 +179,10 @@ footer { padding: 0 16px 16px; text-align: center; }
 .add-menu { display: flex; flex-direction: column; gap: 4px; min-width: 200px; padding: 4px; border: 1px solid var(--tr-line-strong); border-radius: var(--tr-r-overlay); background: var(--tr-surface); box-shadow: var(--tr-shadow-overlay); }
 .add-menu[hidden] { display: none; }
 .add-menu button { justify-content: flex-start; border-color: transparent; background: none; color: var(--tr-fg); font-weight: 500; }
+/* An agent in two ways (1.43.0): its name, then CLI and Chat. */
+.add-row { display: flex; align-items: center; gap: 6px; padding-left: 12px; color: var(--tr-fg); font-weight: 500; }
+.add-row > span { flex: 1; }
+.add-menu .add-row .add-way { flex: none; justify-content: center; min-width: 56px; border-color: var(--tr-line); }
 /* What the page has to say (a channel added, a control that failed), as a notice above the tabs. */
 .phone-alert { position: fixed; left: calc(16px + env(safe-area-inset-left)); right: calc(88px + env(safe-area-inset-right)); bottom: calc(88px + env(safe-area-inset-bottom)); z-index: 9; margin: 0; padding: 12px; border: 1px solid var(--tr-line); border-radius: var(--tr-r-panel); background: var(--tr-surface); box-shadow: inset 3px 0 0 var(--tr-accent), var(--tr-shadow-overlay); color: var(--tr-fg); font: 400 13px/20px var(--tr-font-ui); }
 .phone-alert:empty { display: none; }

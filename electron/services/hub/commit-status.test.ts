@@ -29,6 +29,8 @@ describe('commits named in memory notes', () => {
     const root = temp(); const remote = path.join(root, 'remote.git'); const clone = path.join(root, 'clone');
     git(root, 'init', '--bare', remote); git(root, 'init', clone); fs.writeFileSync(path.join(clone, 'a.txt'), 'a'); git(clone, 'add', '.'); git(clone, 'commit', '-m', 'pushed');
     const pushed = git(clone, 'rev-parse', 'HEAD'); git(clone, 'remote', 'add', 'origin', remote); git(clone, 'push', '-q', 'origin', 'HEAD:main'); git(clone, 'fetch', '-q', 'origin');
+    // A remote's HEAD pointer, which git 2.48 and later make at a fetch by themselves, is no branch: never listed as "origin".
+    git(clone, 'remote', 'set-head', 'origin', 'main');
     fs.writeFileSync(path.join(clone, 'a.txt'), 'b'); git(clone, 'commit', '-qam', 'local'); const local = git(clone, 'rev-parse', 'HEAD');
     const status = (await commitStatus(clone, [pushed.slice(0, 7), local, 'deadbeef']))!;
     expect(status.commits).toEqual([{ sha: pushed.slice(0, 7), known: true, remotes: ['origin/main'] }, { sha: local, known: true, remotes: [] }, { sha: 'deadbeef', known: false, remotes: [] }]);

@@ -11,6 +11,8 @@ const PORT = 47831;
 // Phone remote end to end: turn it on, pair a "phone" (a second window on the remote's page), watch a channel, answer
 // its approval prompt from the phone, and remove the phone. Tailscale is not installed here; the page is reached on
 // loopback, which the remote also accepts.
+/** The longest the whole run may take before it fails on its own. */
+const WATCHDOG_MS = 8 * 60000;
 (async () => {
   const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'hub-remote-'))); const bin = path.join(root, 'bin'); const project = path.join(root, 'project');
   await Promise.all([bin, project].map((folder) => fs.mkdir(folder)));
@@ -37,6 +39,9 @@ ${terminalFixture}
   const args = ['--user-data-dir=' + path.join(root, 'profile'), path.resolve(__dirname, '..'), '--production'];
   if (process.env.CODING_HUB_TEST_NO_SANDBOX === '1') args.unshift('--no-sandbox', '--disable-gpu', '--disable-dev-shm-usage');
   let app;
+  // It takes under a minute on the Windows runner. An Electron error box once held it for the job's whole 60 minutes, so
+  // past this it closes the app and fails, saying so (the workflow step has its own limit too).
+  const watchdog = setTimeout(() => { console.error(`remote-smoke: no result after ${WATCHDOG_MS / 60000} minutes; stopping.`); process.exitCode = 1; void Promise.resolve(app?.close()).catch(() => {}).finally(() => process.exit(1)); }, WATCHDOG_MS);
   try {
     app = await _electron.launch({ executablePath: require('electron'), args, env }); const page = await app.firstWindow(); page.setDefaultTimeout(20000);
     await page.waitForSelector('.tr-empty, .session-tile');
@@ -265,10 +270,12 @@ else if (args.startsWith('serve --bg --https=443')) {
     assert.ok(narrow.page <= narrow.width && !narrow.past.length && narrow.title >= 72, `the channel screen at 320 px: ${JSON.stringify(narrow)}`); await phoneSize(390);
     // The phone's own Back (Android's Back button, the iPhone's swipe) leaves the channel for the list, not the app (1.31.6).
     await phone.goBack(); await phone.locator('#channel-list button').first().waitFor(); assert.ok(phone.url().startsWith(`http://127.0.0.1:${PORT}`), 'still in the app');
-    // The phone's + Channel offers each agent as a terminal and, from 1.39.1, as a chat, as the computer's does. The chat
-    // checks below add theirs through the same request the menu sends.
+    // The phone's + Channel offers each agent as a terminal and, from 1.39.1, as a chat, as the computer's does: from 1.43.0
+    // one row each with CLI and Chat, each keeping its full name. The chat checks below add theirs through the same request
+    // the menu sends.
     await phone.locator('#add-channel').click(); await phone.getByRole('menuitem', { name: 'Claude Code', exact: true }).waitFor();
-    assert.deepEqual(await phone.getByRole('menuitem').allTextContents(), ['Terminal', 'Claude Code', 'Codex', 'Gemini', 'Claude Code chat', 'Codex chat', 'Gemini chat'], 'the phone\'s + Channel order');
+    assert.deepEqual(await phone.getByRole('menuitem').allTextContents(), ['Terminal', 'CLI', 'Chat', 'CLI', 'Chat', 'CLI', 'Chat'], 'the phone\'s + Channel rows');
+    assert.deepEqual(await phone.getByRole('menuitem').evaluateAll((items) => items.map((item) => item.getAttribute('aria-label') ?? item.textContent)), ['Terminal', 'Claude Code', 'Claude Code chat', 'Codex', 'Codex chat', 'Gemini', 'Gemini chat'], 'the phone\'s + Channel names');
     await phone.locator('#add-channel').click();
     assert.equal(await phone.evaluate(async () => (await fetch('/api/channel-add', { method: 'POST', headers: { Authorization: 'Bearer ' + localStorage.getItem('trace-remote-token'), 'Content-Type': 'application/json' }, body: JSON.stringify({ engine: 'claude', chat: true }) })).status), 200);
     await phone.locator('#channel-list button').filter({ hasText: 'CH3' }).waitFor();
@@ -373,6 +380,7 @@ else if (args.startsWith('serve --bg --https=443')) {
     assert.equal(await fetch(`http://127.0.0.1:${PORT}/`).then(() => 'open', () => 'closed'), 'closed');
     console.log('PASS: phone remote off by default, per-phone permission to start agents, a chat channel used from the phone (message, approval, reply, shown on the desktop), the phone’s Usage, Tasks, History and Memory tabs, Needs you on the computer and the phone, a hierarchy table’s planner on the phone, a plan revision kept through Stop and Continue, pairing by one-time code, device-key API, live channel output on the phone, an approval answered from the phone clearing the desktop prompt, terminal channels opened at the phone’s size even while the computer is in use, Desktop size remembered on the phone, channels given back, guided Tailscale HTTPS setup, and revocation.');
   } finally {
+    clearTimeout(watchdog);
     await app?.close().catch(() => {});
     await removeFolder(root);
   }

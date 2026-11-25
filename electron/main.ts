@@ -538,6 +538,7 @@ const linkedSchema = z.discriminatedUnion('action', [
   z.object({ action: z.literal('linked-chat-history'), id: z.uuid(), sessionId: z.string().min(1).max(100) }).strict(),
   z.object({ action: z.literal('linked-history'), id: z.uuid() }).strict(),
   z.object({ action: z.literal('linked-history-resume'), id: z.uuid(), key: z.string().min(1).max(200) }).strict(),
+  z.object({ action: z.literal('linked-open-trace'), id: z.uuid() }).strict(),
   z.object({ action: z.literal('linked-update'), id: z.uuid() }).strict(),
   z.object({ action: z.literal('linked-coach-review'), id: z.uuid(), tip: z.uuid() }).strict(),
   z.object({ action: z.literal('linked-paste-image'), id: z.uuid(), sessionId: z.string().min(1).max(100), runId: z.string().min(1).max(100), image: z.string().min(8).max(21 * 1024 * 1024) }).strict(),
@@ -626,6 +627,7 @@ async function linkedRequest(payload: unknown) {
   if (request.action === 'linked-chat-history') return linked.chatHistory(request.id, request.sessionId);
   if (request.action === 'linked-history') return linked.history(request.id);
   if (request.action === 'linked-history-resume') { await linked.resumeHistory(request.id, request.key); return null; }
+  if (request.action === 'linked-open-trace') { await linked.openTrace(request.id); return null; }
   if (request.action === 'linked-update') return linked.update(request.id);
   if (request.action === 'linked-coach-review') { await linked.coachReview(request.id, request.tip); return null; }
   if (request.action === 'linked-paste-image') { await linked.pasteImage(request.id, request.sessionId, request.runId, request.image); return null; }
@@ -760,6 +762,46 @@ function handle<T>(channel: string, operation: (owner: number, payload: unknown)
  */
 let tray: Tray | null = null; let toldAboutTray = false;
 const closeToTray = () => { try { return hub?.preferences().closeToTray !== false; } catch { return true; } };
+/**
+ * Settings → Open Trace when you sign in (1.43.0, on unless turned off): an installed Trace starts in the tray at sign-in,
+ * so its other computers and phones reach it again after a restart or an update without anyone opening it. Windows passes
+ * --hidden; a Mac says it opened Trace at login. A source run, or one on another data folder (tests), never registers.
+ */
+const LOGIN_ARGS = ['--hidden'];
+const openAtLogin = () => { try { return hub?.preferences().openAtLogin !== false; } catch { return true; } };
+function applyLoginItem(changed = false) {
+  if (!app.isPackaged || process.env.CODING_HUB_STORAGE_DIR) return;
+  try {
+    const wanted = openAtLogin(); const windows = process.platform === 'win32';
+    // At start only when it differs, so an entry the person turned off in Windows' Startup apps stays off.
+    if (!changed && app.getLoginItemSettings(windows ? { path: process.execPath, args: LOGIN_ARGS } : undefined).openAtLogin === wanted) return;
+    app.setLoginItemSettings(windows ? { openAtLogin: wanted, path: process.execPath, args: LOGIN_ARGS, name: 'Trace' } : { openAtLogin: wanted });
+  } catch { hostHealth?.record('login-item-failed'); }
+}
+/**
+ * Trace's own Quit (the tray's, and Cmd+Q on a Mac; never a shutdown or sign-out, which quit without asking): while phones
+ * or other computers hold a key to this one, quitting cuts them off, so it asks first and offers the tray instead.
+ * "Don't ask again" turns it off (Settings → Ask before quitting). `stopChannels`: the tray's Stop all channels and quit.
+ */
+async function quitFromTrace(stopChannels = false) {
+  let reached = 0; let ask = false;
+  try { reached = remote?.enabled ? remote.status().devices.length : 0; ask = reached > 0 && closeToTray() && hub?.preferences().quitWarning !== false; } catch { /* Unreadable: quit as asked. */ }
+  if (ask) {
+    const options = { type: 'question' as const, buttons: ['Keep Trace in the tray', 'Quit anyway'], defaultId: 0, cancelId: 0, title: 'Quit Trace?', message: 'Your other computers and phones can’t reach this computer while Trace is closed.',
+      detail: `${reached} ${reached === 1 ? 'device' : 'devices'} can reach it now. Keeping Trace in the tray leaves channels, the phone and other computers working; the window can still be closed.`, checkboxLabel: 'Don’t ask again' };
+    const parent = window && !window.isDestroyed() && window.isVisible() ? window : null;
+    const { response, checkboxChecked } = parent ? await dialog.showMessageBox(parent, options) : await dialog.showMessageBox(options);
+    if (checkboxChecked && response === 1 && hub) { try { hub.execute({ action: 'save-preferences', preferences: { ...hub.preferences(), quitWarning: false } }); } catch { /* Asked again next time. */ } }
+    if (response !== 1) { if (window && !window.isDestroyed()) { updateTray(); if (tray) window.hide(); } return; }
+  }
+  if (stopChannels) stopChannelsOnQuit = true; app.quit();
+}
+/** Opened at sign-in: the window waits hidden, with the tray icon, until the person opens it (only while closing the window keeps Trace running). */
+function startedHidden() {
+  if (!closeToTray()) return false;
+  if (process.argv.includes('--hidden')) return true;
+  try { return process.platform === 'darwin' && app.getLoginItemSettings().wasOpenedAtLogin; } catch { return false; }
+}
 function showWindow() { if (quitting) return; if (!window || window.isDestroyed()) { createWindow(); return; } if (window.isMinimized()) window.restore(); window.show(); window.focus(); }
 /** The tray's icon: the app's, at tray size (a source checkout has no built phone app, so its own assets folder). */
 function trayImage() {
@@ -773,10 +815,11 @@ function updateTray() {
   const running = manager.running().length;
   const words = running ? `${running} ${running === 1 ? 'channel' : 'channels'} running` : 'No channels running';
   tray.setToolTip(`Trace · ${words}`);
-  tray.setContextMenu(Menu.buildFromTemplate([{ label: 'Show Trace', click: showWindow }, { label: words, enabled: false }, { type: 'separator' }, ...(background && running ? [{ label: 'Stop all channels and quit', click: () => { stopChannelsOnQuit = true; app.quit(); } }] : []), { label: background && running ? 'Quit Trace (channels keep running)' : 'Quit Trace', click: () => app.quit() }]));
+  tray.setContextMenu(Menu.buildFromTemplate([{ label: 'Show Trace', click: showWindow }, { label: words, enabled: false }, { type: 'separator' }, ...(background && running ? [{ label: 'Stop all channels and quit', click: () => void quitFromTrace(true) }] : []), { label: background && running ? 'Quit Trace (channels keep running)' : 'Quit Trace', click: () => void quitFromTrace() }]));
 }
-function createWindow() {
+function createWindow(hidden = false) {
   window = new BrowserWindow({
+    show: !hidden,
     width: 1520,
     height: 980,
     minWidth: 900,
@@ -873,8 +916,10 @@ function createWindow() {
 function applicationMenu(): MenuItemConstructorOptions[] {
   const view: MenuItemConstructorOptions = { label: 'View', submenu: [{ role: 'resetZoom' }, { role: 'zoomIn' }, { role: 'zoomOut' }, { type: 'separator' }, { role: 'togglefullscreen' }, ...(app.isPackaged ? [] : [{ role: 'toggleDevTools' } as const])] };
   if (process.platform !== 'darwin') return [{ role: 'editMenu' }, view];
-  // No Close Window (Cmd+W); the window's own close button and Quit (Cmd+Q) stay.
-  return [{ role: 'appMenu' }, { role: 'editMenu' }, view, { label: 'Window', submenu: [{ role: 'minimize' }, { role: 'zoom' }, { type: 'separator' }, { role: 'front' }] }];
+  // No Close Window (Cmd+W); the window's own close button and Quit (Cmd+Q) stay. Quit is Trace's own, so it can ask
+  // before cutting off other computers and phones; the system's shutdown and sign-out still quit without asking.
+  const appMenu: MenuItemConstructorOptions = { label: app.name, submenu: [{ role: 'about' }, { type: 'separator' }, { role: 'services' }, { type: 'separator' }, { role: 'hide' }, { role: 'hideOthers' }, { role: 'unhide' }, { type: 'separator' }, { label: `Quit ${app.name}`, accelerator: 'Command+Q', click: () => void quitFromTrace() }] };
+  return [appMenu, { role: 'editMenu' }, view, { label: 'Window', submenu: [{ role: 'minimize' }, { role: 'zoom' }, { type: 'separator' }, { role: 'front' }] }];
 }
 
 // Opened from Finder or the Dock, the Mac app lacks the shell's PATH, where the CLIs and Node.js usually are.
@@ -885,8 +930,10 @@ let reopenAfterQuit = false;
 let relaunching = false;
 // Opening Trace again (Start menu, shortcut, Dock) while it runs shows the window it already has, instead of nothing.
 // While it is quitting (saving memory summaries can take seconds after the window is gone), it opens again afterwards.
-app.on('second-instance', () => {
+app.on('second-instance', (_event, argv) => {
   if (quitting) { if (!updateRestart && !scriptUpdate) reopenAfterQuit = true; return; }
+  // Started hidden (at sign-in, or by another computer through the screen service) while Trace runs: nothing to show.
+  if (argv.includes('--hidden')) return;
   if (!window || window.isDestroyed()) return; showWindow();
 });
 if (!app.requestSingleInstanceLock()) app.quit();
@@ -1345,7 +1392,13 @@ It runs without a shell. Save it only if you trust this program.` })).response =
     },
   });
   handle(IPC_CHANNELS.updates, (_owner, payload) => updates!.execute(payload));
-  handle(IPC_CHANNELS.hub, (_owner, payload) => { if (!hub) throw new HubError('STORAGE_UNAVAILABLE', 'Local integrations require a writable storage folder.'); return hub.executeAsync(payload); });
+  handle(IPC_CHANNELS.hub, async (_owner, payload) => {
+    if (!hub) throw new HubError('STORAGE_UNAVAILABLE', 'Local integrations require a writable storage folder.');
+    const result = await hub.executeAsync(payload);
+    // A saved setting takes effect now: the sign-in entry, and the tray (Keep running when the window is closed).
+    if ((payload as { action?: unknown } | null)?.action === 'save-preferences') { applyLoginItem(true); try { updateTray(); } catch { hostHealth?.record('tray-unavailable'); } }
+    return result;
+  });
   handle(IPC_CHANNELS.openRepository, (owner, payload) => repositoryFiles.open(owner, payload));
   handle(IPC_CHANNELS.closeRepository, (owner, payload) => { repositoryFiles.close(owner, payload); return null; });
   handle(IPC_CHANNELS.listDirectory, (owner, payload) => repositoryFiles.list(owner, payload));
@@ -1445,7 +1498,10 @@ It runs without a shell. Save it only if you trust this program.` })).response =
     return null;
   });
   handle(IPC_CHANNELS.stopSession, async (owner, payload) => { await manager.stop(owner, payload); return null; });
-  createWindow();
+  // Opened at sign-in: the window loads (channels need it) but stays hidden in the tray; with no tray, it shows.
+  const hidden = startedHidden(); createWindow(hidden);
+  if (hidden) { try { updateTray(); } catch { hostHealth?.record('tray-unavailable'); } if (!tray) window?.show(); }
+  applyLoginItem();
   updates.start();
   // Today's usage against the budgets set in Settings, and the plan limits the CLIs last reported (Usage and the status
   // bar read them every 5 minutes): checked every minute. What was said is kept for the day, so a restart does not repeat it.

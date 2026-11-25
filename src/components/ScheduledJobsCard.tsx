@@ -82,7 +82,7 @@ export function ScheduledJobsCard() {
         <label className="ui-field">{form.kind === 'hours' ? 'Starting at' : 'Time'}<input type="time" aria-label="Job time" required value={form.time} onChange={(e) => setForm({ ...form, time: e.target.value })} /></label>
       </div>
       {form.kind === 'weekdays' && <fieldset className="scheduled-job-days"><legend>Days</legend>{DAYS.map((day, index) => <label key={day} className="ui-check"><input type="checkbox" checked={form.days.includes(index)} onChange={(e) => setForm({ ...form, days: e.target.checked ? [...form.days, index].sort() : form.days.filter((item) => item !== index) })} />{day}</label>)}</fieldset>}
-      <small className="ui-hint">{describeSchedule(schedule())}, on this computer’s clock, while Trace is running.{form.engine === 'gemini' ? ' Trace cannot read Gemini’s replies, so you move its tasks on yourself.' : ''}</small>
+      <small className="ui-hint">{describeSchedule(schedule())}, on this computer’s clock, while Trace is running.{form.engine === 'gemini' ? ' Trace reads Gemini’s screen for TASK COMPLETE to move its task on.' : ''}</small>
       <div className="ui-actions"><button className="button primary" disabled={busy || !form.name.trim() || !form.prompt.trim() || !form.directory.trim() || form.kind === 'weekdays' && !form.days.length}>{form.id ? 'Save' : 'Add scheduled job'}</button><button type="button" className="quiet-button" onClick={close}>Cancel</button></div>
     </form>}
   </section>;

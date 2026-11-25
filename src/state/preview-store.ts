@@ -40,3 +40,11 @@ export async function loadPreviews() {
   const shown = value.shown ? { ...value.shown, url: value.offers.find((offer) => offer.sessionId === value.shown!.sessionId && offer.port === value.shown!.port)?.url ?? `localhost:${value.shown.port}` } : null;
   usePreviewStore.setState({ offers, shown });
 }
+
+/** A box on the window, in CSS pixels. */
+export interface Box { left: number; top: number; right: number; bottom: number }
+/**
+ * Whether anything drawn over the page's room overlaps it: the native page is drawn above Trace's own window, so a menu,
+ * dialog or list that opens over it would be hidden behind it (1.43.0). Boxes with no size are not drawn.
+ */
+export const covers = (room: Box, over: Box[]) => over.some((box) => box.right > box.left && box.bottom > box.top && box.left < room.right && box.right > room.left && box.top < room.bottom && box.bottom > room.top);

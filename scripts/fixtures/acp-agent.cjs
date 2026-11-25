@@ -9,6 +9,8 @@
 // - session/prompt: "write <name.ext>" (a plain file name, so a reviewer's `write "VERIFIED F1"` instruction is not one) asks for a file change (kind edit) and, if allowed, writes the file in the session's
 //   folder; a Round Table's round is answered AGREE; anything else is answered "ACP <mode> got: <text> (mcp: <names>)".
 //   The answer streams as two agent_message_chunk updates, then the turn ends (end_turn).
+// - "drift <mode>": answered, then, once the turn has ended, the agent switches to that mode by itself and says so
+//   (current_mode_update), as an agent may between turns or after a resume.
 // - session/cancel ends the open turn as cancelled.
 // ACP_FIXTURE_LOG names a file that gets one JSON line per message received, for the tests.
 if (process.argv.includes('--version')) { console.log('fixture-acp 1.0'); process.exit(0); }
@@ -59,6 +61,8 @@ function handle(message) {
         return send({ id: asked, method: 'session/request_permission', params: { sessionId: params.sessionId, toolCall: { toolCallId: `w${asked}`, title: `Write ${path.basename(file)}`, kind: 'edit', locations: [{ path: file }] }, options: [{ optionId: 'allow', name: 'Allow', kind: 'allow_once' }, { optionId: 'deny', name: 'Deny', kind: 'reject_once' }] } });
       }
       if (/\[Trace Round Table · round/.test(text)) return setTimeout(() => say(message.id, params.sessionId, 'AGREE'), 50);
+      const drift = /\bdrift ([\w-]+)\b/.exec(text)?.[1];
+      if (drift) return setTimeout(() => { say(message.id, params.sessionId, `Drifting to ${drift}.`); setTimeout(() => { session.mode = drift; update(params.sessionId, { sessionUpdate: 'current_mode_update', currentModeId: drift }); }, 30); }, 50);
       const last = text.trim().split('\n').filter(Boolean).at(-1) ?? '';
       return setTimeout(() => say(message.id, params.sessionId, `ACP ${session.mode} ${session.model} got: ${last.slice(0, 200)} (mcp: ${session.servers.join(',') || 'none'})`), 50);
     }

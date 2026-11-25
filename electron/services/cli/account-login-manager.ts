@@ -9,7 +9,7 @@ import { freshHostEnvironment } from './discovery';
 import type { ClaudeProfiles } from './claude-profiles';
 import { HubError } from './engine-adapter';
 import { nodePty } from './native-pty';
-const provider = z.enum(['claude', 'codex', 'github']); const cols = z.number().int().min(2).max(500); const rows = z.number().int().min(1).max(300);
+const provider = z.enum(['claude', 'codex', 'gemini', 'github']); const cols = z.number().int().min(2).max(500); const rows = z.number().int().min(1).max(300);
 const schema = z.discriminatedUnion('action', [z.object({ action: z.literal('status'), profileId: z.uuid().optional() }).strict(), z.object({ action: z.literal('profile-list') }).strict(), z.object({ action: z.literal('labels') }).strict(), z.object({ action: z.literal('profile-create'), name: z.string().trim().min(1).max(60) }).strict(), z.object({ action: z.literal('profile-rename'), profileId: z.uuid(), name: z.string().trim().min(1).max(60) }).strict(), z.object({ action: z.literal('login'), provider, profileId: z.uuid().optional(), cols, rows }).strict(), z.object({ action: z.literal('stop'), runId: z.uuid().optional() }).strict(), z.object({ action: z.literal('write'), runId: z.uuid(), data: z.string().max(16384) }).strict(), z.object({ action: z.literal('resize'), runId: z.uuid(), cols, rows }).strict(), z.object({ action: z.literal('install-guide'), provider }).strict()]);
 interface Run { owner: number; login: AccountLogin; pty: IPty; exited: Promise<void>; resolve: () => void; finished: boolean }
 export class AccountLoginManager {
@@ -37,12 +37,12 @@ export class AccountLoginManager {
       if (request.action === 'profile-create') return profiles.create(request.name);
       return profiles.rename(request.profileId, request.name);
     }
-    if (request.action === 'status') return (await Promise.all((['claude', 'codex', 'github'] as const).map(async (provider) => {
+    if (request.action === 'status') return (await Promise.all((['claude', 'codex', 'gemini', 'github'] as const).map(async (provider) => {
       const result = await inspect(provider, await profileEnvironment(provider === 'claude' ? request.profileId : undefined));
       return { ...result.connection, ...(provider === 'claude' && request.profileId ? { profileId: request.profileId } : {}) };
     })));
 
-    if (request.action === 'install-guide') { await this.dependencies.openGuide(INSTALL_GUIDES[request.provider]); return null; }
+    if (request.action === 'install-guide') { const guide = INSTALL_GUIDES[request.provider]; if (!guide) throw new HubError('NO_INSTALL_GUIDE', 'Trace has no installation page for this CLI. Install it from its maker, then refresh.'); await this.dependencies.openGuide(guide); return null; }
     if (request.action === 'stop') { await this.stopOwner(owner, request.runId); return null; }
     if (request.action === 'write' || request.action === 'resize') {
       const run = this.run;

@@ -71,12 +71,13 @@ export function flushChatDeltas(sessionId?: string) {
 
 /**
  * A chat run started. A fresh conversation starts an empty thread; a resumed one keeps what this window showed, with a
- * line saying Claude continues from there (earlier messages from before Trace opened are in Claude's own history).
+ * line saying the agent continues from there (earlier messages from before Trace opened are in its own history).
+ * `agent`: its name in those lines (it said Claude for every agent before 1.43.0).
  */
-export function chatStarted(sessionId: string, runId: string, resumed: boolean) {
+export function chatStarted(sessionId: string, runId: string, resumed: boolean, agent = 'The agent') {
   update(sessionId, (current) => resumed && current.items.length
-    ? { ...current, runId, busy: false, items: [...current.items, { kind: 'notice', order: ++counter, id: nextId(), text: 'Restarted. Claude continues this conversation.', error: false }] }
-    : { ...EMPTY, runId, items: resumed ? [{ kind: 'notice', order: ++counter, id: nextId(), text: 'Resumed a saved conversation. Earlier messages are in Claude’s history; new ones appear here.', error: false }] : [] });
+    ? { ...current, runId, busy: false, items: [...current.items, { kind: 'notice', order: ++counter, id: nextId(), text: `Restarted. ${agent} continues this conversation.`, error: false }] }
+    : { ...EMPTY, runId, items: resumed ? [{ kind: 'notice', order: ++counter, id: nextId(), text: `Resumed a saved conversation. Earlier messages are in ${agent}’s history; new ones appear here.`, error: false }] : [] });
 }
 export function chatEnded(sessionId: string) { update(sessionId, (current) => ({ ...current, busy: false, items: current.items.map((item) => item.kind === 'permission' && !item.answer ? { ...item, answer: 'closed' } : item) })); }
 /**

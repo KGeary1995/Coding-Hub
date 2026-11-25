@@ -1,7 +1,10 @@
 import { useLayoutEffect, useRef } from 'react';
 import { AppWindow, ExternalLink, LoaderCircle, RefreshCw, X } from 'lucide-react';
 import { previewLabel } from '../../shared/app-preview';
-import { placePreview, previewAction, usePreviewStore } from '../state/preview-store';
+import { covers, placePreview, previewAction, usePreviewStore } from '../state/preview-store';
+
+/** What Trace draws over the channels that the native page would otherwise hide: menus, dialogs, lists and tooltips. */
+const OVERLAYS = '[role="menu"], [role="listbox"], [role="dialog"], dialog[open], [role="tooltip"]';
 
 /**
  * The app preview beside the channels (1.39.0). Trace draws the app's page itself, over the room this panel keeps
@@ -14,10 +17,15 @@ export function AppPreviewPanel() {
   useLayoutEffect(() => {
     const element = room.current; if (!element || !shown) return;
     // Sent only when it moved: a notice above the channels moves the room without resizing it, so it is also looked at twice a second.
-    let last = ''; const measure = () => { const box = element.getBoundingClientRect(); const bounds = { x: Math.max(0, box.left), y: Math.max(0, box.top), width: Math.max(0, box.width), height: Math.max(0, box.height) }; const key = JSON.stringify(bounds); if (key !== last) { last = key; placePreview(bounds); } };
+    // While a menu, dialog or list of Trace's lies over the room, the page is hidden, so that shows (the page is drawn above the window).
+    let last = ''; const measure = () => { const box = element.getBoundingClientRect(); const over = [...document.querySelectorAll<HTMLElement>(OVERLAYS)].filter((item) => !element.closest('.app-preview')?.contains(item)).map((item) => item.getBoundingClientRect()); const bounds = covers(box, over) ? { x: 0, y: 0, width: 0, height: 0 } : { x: Math.max(0, box.left), y: Math.max(0, box.top), width: Math.max(0, box.width), height: Math.max(0, box.height) }; const key = JSON.stringify(bounds); if (key !== last) { last = key; placePreview(bounds); } };
     measure(); const observer = new ResizeObserver(measure); observer.observe(element); const timer = setInterval(measure, 500);
+    // A menu opening is seen at once, not at the next half-second: at most once a frame, and never for a terminal's own
+    // output, which changes the page many times a second.
+    let queued = false; const opened = new MutationObserver((records) => { if (queued || records.every((record) => (record.target as Element).closest?.('.xterm'))) return; queued = true; requestAnimationFrame(() => { queued = false; measure(); }); });
+    opened.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['open', 'hidden'] });
     // Leaving the channels (another page of Trace in front) hides the page; the preview stays open for coming back.
-    return () => { observer.disconnect(); clearInterval(timer); placePreview(null); };
+    return () => { observer.disconnect(); opened.disconnect(); clearInterval(timer); placePreview(null); };
   }, [shown?.sessionId, shown?.port, Boolean(shown)]);
   // An app that could not be opened says why, until closed.
   if (!shown) return error ? <aside className="app-preview ui-card" aria-label="App preview"><header className="ui-card-head"><AppWindow size={16} /><h2>App preview</h2><div className="ui-card-actions"><button className="icon-button" aria-label="Close the app preview" onClick={() => usePreviewStore.setState({ error: null })}><X size={14} /></button></div></header><p className="app-preview-error error-message" role="alert">{error}</p></aside> : null;

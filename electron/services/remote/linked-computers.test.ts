@@ -79,6 +79,21 @@ describe('linked computers', () => {
     (mac as unknown as { fetcher: unknown }).fetcher = async () => new Response(JSON.stringify({ error: 'Not found.' }), { status: 404 });
     await expect(mac.history(PC)).rejects.toMatchObject({ code: 'LINK_OLD' }); await expect(mac.resumeHistory(PC, 'codex:def')).rejects.toMatchObject({ code: 'LINK_OLD' });
   });
+  it('opens Trace on a computer where it is closed, through its screen service, and says why when it cannot', async () => {
+    const pc = await computer(PC, 'Obsidian-Halo', 'pc-1');
+    const mac = new LinkedComputers(temporary(), () => ({ id: MAC, name: 'MacBook' }), () => [{ id: PC, name: 'Obsidian-Halo', url: pc.url }], () => {}, { output: () => {}, resize: () => {}, changed: () => {} });
+    cleanup.push(() => mac.stop()); await mac.link(PC, pc.server.pair('computer').pairing!.code);
+    const asked: { url: string; auth: string | null }[] = [];
+    const answer = (status: number, body: unknown) => { (mac as unknown as { fetcher: unknown }).fetcher = async (input: string | URL, init?: RequestInit) => { asked.push({ url: String(input), auth: new Headers(init?.headers).get('authorization') }); return new Response(JSON.stringify(body), { status }); }; };
+    answer(200, { ok: true }); await mac.openTrace(PC);
+    expect(asked[0].url).toBe(new URL('api/screen/open-trace', pc.url).toString()); expect(asked[0].auth).toMatch(/^Bearer [A-Za-z0-9_-]{43}$/);
+    // Nothing answers there (a Mac, sharing off, asleep), an older Trace, a refusal with its reason, a removed link.
+    answer(502, {}); await expect(mac.openTrace(PC)).rejects.toMatchObject({ code: 'OPEN_UNAVAILABLE', message: expect.stringContaining('Share this screen') });
+    answer(404, { error: 'Not found.' }); await expect(mac.openTrace(PC)).rejects.toMatchObject({ code: 'LINK_OLD' });
+    answer(403, { error: 'Share this screen is off on Obsidian-Halo, so Trace can\'t be opened from here.' }); await expect(mac.openTrace(PC)).rejects.toMatchObject({ code: 'OPEN_REFUSED', message: expect.stringContaining('Share this screen is off') });
+    answer(401, {}); await expect(mac.openTrace(PC)).rejects.toMatchObject({ code: 'LINK_REVOKED' });
+    (mac as unknown as { fetcher: unknown }).fetcher = async () => { throw new TypeError('fetch failed'); }; await expect(mac.openTrace(PC)).rejects.toMatchObject({ code: 'LINK_UNREACHABLE' });
+  });
   it('connects again at once when this computer wakes from sleep (1.35.1)', async () => {
     const pc = await computer(PC, 'Obsidian-Halo', 'pc-1');
     const mac = new LinkedComputers(temporary(), () => ({ id: MAC, name: 'MacBook' }), () => [{ id: PC, name: 'Obsidian-Halo', url: pc.url }, { id: MAC, name: 'MacBook', url: null }], () => {}, { output: () => {}, resize: () => {}, changed: () => {} });

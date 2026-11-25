@@ -1,3 +1,4 @@
+import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { app, clipboard, Menu, Notification, Tray } from 'electron';
@@ -77,6 +78,8 @@ else {
         return { source: capture, input, stop: () => capture.stop(), displays: capture.displays, display: capture.display };
       },
       readClipboard: async () => String(await clipboard.readText()),
+      // Trace itself, in the tray (--hidden), as the signed-in user this service runs as; a source run starts the same checkout.
+      openTrace: () => { spawn(process.execPath, [...(app.isPackaged ? [] : [app.getAppPath()]), '--hidden'], { detached: true, stdio: 'ignore', windowsHide: true, env: { ...process.env, ...(app.isPackaged ? {} : { CODING_HUB_STORAGE_DIR: root }) } }).unref(); },
       viewing: (name, disconnect) => {
         tray?.destroy(); tray = null; if (!name) return;
         tray = new Tray(icon);

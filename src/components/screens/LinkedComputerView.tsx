@@ -35,6 +35,24 @@ function UpdateThere({ computer }: { computer: LinkedComputer }) {
   </>;
 }
 
+/**
+ * Trace closed on that computer: its screen service (Windows, Share this screen) starts it in the tray, and the link
+ * connects by itself. What went wrong, or what to do instead (a Mac, sharing off, asleep), is said beside the button.
+ */
+function OpenTraceThere({ computer }: { computer: LinkedComputer }) {
+  const [busy, setBusy] = useState(false); const [note, setNote] = useState<{ text: string; error: boolean } | null>(null);
+  async function open() {
+    setBusy(true); setNote(null);
+    try { await workbench({ action: 'linked-open-trace', id: computer.id }); setNote({ text: `Opening Trace on ${computer.name}. It connects here by itself in a moment.`, error: false }); }
+    catch (error) { setNote({ text: (error as Error).message, error: true }); }
+    finally { setBusy(false); }
+  }
+  return <>
+    <button className="button primary" disabled={busy} title={`Start Trace on ${computer.name} in its tray, through its screen sharing service`} onClick={() => void open()}>{busy ? <LoaderCircle className="spin" aria-hidden="true" /> : <Play aria-hidden="true" />}Open Trace on {computer.name}</button>
+    {note && <p className={note.error ? 'error-message' : 'muted'} role="status">{note.text}</p>}
+  </>;
+}
+
 const ENGINE_NAME = { claude: 'Claude Code', codex: 'Codex', gemini: 'Gemini', custom: 'Agent', shell: 'Terminal' } as const;
 
 /**
@@ -147,6 +165,7 @@ export function LinkedComputerView() {
       {!computer.connected && !computer.error && computer.linked && <div className="ui-empty linked-empty" role="status"><LoaderCircle className="spin" aria-hidden="true" /><h3>Connecting to {computer.name}…</h3></div>}
       {/* Its screen-sharing server answers even while Trace there is closed, so the screen is the one action offered. */}
       {!computer.connected && (computer.error || !computer.linked) && <div className="ui-empty linked-empty danger"><MonitorOff aria-hidden="true" /><h3>{computer.name} is not reachable; Trace keeps trying</h3><p>Check that it is on, with Trace open and Tailscale connected.</p>
+        {computer.linked && <OpenTraceThere computer={computer} />}
         {/* The header's Screen does the same; this one is named apart so each name stays unique. */}<button className="button secondary" aria-label={`Screen of ${computer.name}`} title={`If Trace has closed on ${computer.name}, its screen still answers`} onClick={() => setScreenOf(computer.id)}><MonitorPlay aria-hidden="true" />Screen</button></div>}
       {computer.channels.length > 0 && <LinkedGrid computer={computer} />}</>}
   </section>;

@@ -13,3 +13,8 @@ export const atPhoneSize = (granted: boolean, holding: boolean) => granted || ho
  * channel restarted on the computer starts at the desktop's size, which takes nothing from the phone.
  */
 export const takenBack = (had: boolean, holding: boolean, asked: boolean, mine: boolean) => had && holding && asked && !mine;
+/**
+ * Whether a channel's replayed screen asks for the phone's size: only one just opened on the phone, or a new run of it
+ * (a restart). A replay after a reconnect does not: the computer led meanwhile, so the phone waits to be touched (1.43.0).
+ */
+export const replayAsks = (fresh: boolean, restarted: boolean) => fresh || restarted;
