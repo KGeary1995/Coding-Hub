@@ -125,7 +125,9 @@ export function useNativeHost() {
     // them, with Save to memory): they are tried again every few minutes, so a Drive folder that came back needs no click.
     const findingsTimer = setInterval(() => { const sessions = useWorkspaceStore.getState().sessions; for (const session of sessions) { const record = session.roundTable; if (record?.findings?.length && !hiddenSeatIds(record, session.id).some((seat) => sessions.some((other) => other.id === seat))) void forgetTable(session.id); } }, 5 * 60000);
     const unsubscribe = host.onSessionEvent((event) => {
-      if (event.type === 'answered' && event.finished) { turnDone(event.sessionId); taskTurnDone(event.sessionId); void askForHandoff(event.sessionId).catch(() => {}); }
+      // A chat's turn end also comes as its 'done' (chatTurnDone), which asks for the handoff: asked twice, a turn counted
+      // twice, and the wait for the saved handoff (three turns) gave up after one and a half.
+      if (event.type === 'answered' && event.finished) { turnDone(event.sessionId); taskTurnDone(event.sessionId); const ended = useWorkspaceStore.getState().sessions.find((item) => item.id === event.sessionId); if (!ended || !isChatRun(ended.config)) void askForHandoff(event.sessionId).catch(() => {}); }
       // A chat channel's thread starts (or continues, when resuming) with each run and closes its approvals at exit.
       const before = useWorkspaceStore.getState().sessions.find((item) => item.id === event.sessionId);
       // A chat's thread: Claude Code's or Codex's, or a Round Table's Gemini seat.
