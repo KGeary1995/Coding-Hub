@@ -41,16 +41,19 @@ export function screenState(engine: string, lines: string[], title: string): { s
 /**
  * Turns screen readings into changes worth reporting: a state counts once it has been read twice in a row (herdr confirms
  * before trusting a change). `blocked` is reported when the screen first shows an approval form; `resolved`, when a
- * screen that showed one, or a run Trace marked as asking, shows the agent working again.
+ * screen that showed one, or a run Trace marked as asking, shows the agent working again; `working`, when it starts
+ * working otherwise; and `settled` (1.43.0), when a working screen shows the agent working no more, the cross-check of
+ * a turn's end that its own signal may have missed (pty-manager confirms it once the run has stayed quiet).
  */
 export class ScreenWatch {
   private last: ScreenState = 'unknown'; private pending: ScreenState = 'unknown'; private seen = 0; private stable: ScreenState = 'unknown';
-  push(reading: { state: ScreenState }): 'blocked' | 'resolved' | null {
+  push(reading: { state: ScreenState }): 'blocked' | 'resolved' | 'working' | 'settled' | null {
     if (reading.state === this.pending) this.seen++; else { this.pending = reading.state; this.seen = 1; }
     if (this.seen < 2 || reading.state === this.stable) return null;
     const before = this.stable; this.stable = reading.state; this.last = before;
     if (reading.state === 'blocked') return 'blocked';
-    if (reading.state === 'working' && before === 'blocked') return 'resolved';
+    if (reading.state === 'working') return before === 'blocked' ? 'resolved' : 'working';
+    if (before === 'working') return 'settled';
     return null;
   }
   /** Trace was told by the CLI itself that it asks: a working screen after it clears that, too. */
