@@ -6,6 +6,8 @@
 - **A turn's end that the CLI did not report.** When a Claude Code or Codex terminal stops showing work and stays quiet for 8 seconds without saying its turn ended, Trace ends the turn itself, so Done, tasks and automatic checks are not left waiting. A turn's end is never counted twice. Any agent whose CLI sends OSC 7501 status, as Gemini does, is read the same way.
 - **Chats are compacted after their handoff.** Near the end of its context, a Claude Code or Codex chat that saved its handoff is compacted, as terminal channels already were. The conversation shows `/compact`.
 - **⚠️ and ✔️ line up in terminals.** Emoji made wide by a variation selector now take the two columns the CLIs draw them in, so the text after them is no longer a column off.
+- **Fixed:** a click on a channel's Controls could miss while a busy chat's state word changed (Working, Done, Your turn), because the word changed the header's layout under the pointer. The state stays one width now.
+- **Prices** checked against Anthropic's, OpenAI's and Google's pages on 2026-11-25: unchanged.
 - **Tried:** unit tests (each new behaviour), the desktop and terminal smoke tests, `/compact` in Claude Code's chat mode with the real Claude Code (2.1.332), and the emoji widths on Node 22 and 24.
 - **Not tried yet:** Review again with real agents, the turn-end check with a real CLI that missed its signal, and Codex's compaction with the real Codex.
 
