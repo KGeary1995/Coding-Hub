@@ -166,7 +166,7 @@ export class PtyManager {
 
   constructor(
     private emit: (owner: number, event: SessionEvent) => void,
-    private dependencies: { onEventError?: () => void; onContextWindow?: (runId: string, size: number) => void;stopDependencies?: StopDependencies; spawn?: Spawn; discover?: typeof discoverEngine; environment?: () => Record<string, string> | Promise<Record<string, string>>; profileEnvironment?: (base: Record<string, string>, id?: string) => Record<string, string>; onStarted?: (session: AgentRunningSession, config: AgentConfig, owner: number) => void; prepareLaunch?: (session: BuiltInRunningSession, config: CLIEngineConfig, info: EngineInfo, launch: { args: string[]; env: Record<string, string> }) => void;
+    private dependencies: { onEventError?: () => void; /** The person's safe commands setting (on unless false), for Gemini chats. */ safeActions?: () => boolean; onContextWindow?: (runId: string, size: number) => void;stopDependencies?: StopDependencies; spawn?: Spawn; discover?: typeof discoverEngine; environment?: () => Record<string, string> | Promise<Record<string, string>>; profileEnvironment?: (base: Record<string, string>, id?: string) => Record<string, string>; onStarted?: (session: AgentRunningSession, config: AgentConfig, owner: number) => void; prepareLaunch?: (session: BuiltInRunningSession, config: CLIEngineConfig, info: EngineInfo, launch: { args: string[]; env: Record<string, string> }) => void;
       /**
        * Work an agent launch waits for before prepareLaunch (a project's shared memory brought up to date), started with
        * discovery. Its errors are ignored, and a launch waits at most `beforeLaunchMilliseconds` (default 3 s) for it.
@@ -467,7 +467,7 @@ export class PtyManager {
       // After the window has it, so a reply that ends a round reaches the window before the next round starts.
       if (event.type !== 'permission') { try { this.tables.observe({ sessionId, runId, event }); } catch { this.dependencies.onEventError?.(); } try { this.chains.observe({ sessionId, runId, event }); } catch { this.dependencies.onEventError?.(); } }
     };
-    const stream: ChatStream = protocol.codex ? new CodexStream(write, emit, protocol.codex) : protocol.gemini ? new GeminiStream(write, emit, { ...protocol.gemini, permissions }) : protocol.acp ? new AcpStream(write, emit, { cwd: protocol.acp.cwd, model: protocol.acp.model, ...(protocol.acp.resumeId ? { resumeId: protocol.acp.resumeId } : {}), permissions }, protocol.acp.agent) : new ClaudeStream(write, emit, permissions);
+    const stream: ChatStream = protocol.codex ? new CodexStream(write, emit, protocol.codex) : protocol.gemini ? new GeminiStream(write, emit, { ...protocol.gemini, permissions, safeCommands: this.dependencies.safeActions?.() !== false }) : protocol.acp ? new AcpStream(write, emit, { cwd: protocol.acp.cwd, model: protocol.acp.model, ...(protocol.acp.resumeId ? { resumeId: protocol.acp.resumeId } : {}), permissions }, protocol.acp.agent) : new ClaudeStream(write, emit, permissions);
     run.chat = stream;
     child.onData((data) => { if (!run.finished) stream.push(data); });
     // Claude's own error messages explain a failed start, as a terminal's last lines do.
