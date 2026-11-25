@@ -33,6 +33,7 @@ const path = require('node:path');
 const { _electron } = require('playwright-core');
 const { openView, addChannel, startTable, tileControl } = require('./lib/navigate.cjs');
 const { removeFolder } = require('./lib/cleanup.cjs');
+const { TEST_HIDDEN } = require('./lib/no-drive.cjs');
 const { makeProject, installFixtures } = require('./lib/tour-project.cjs');
 
 const flags = process.argv.slice(3);
@@ -53,7 +54,7 @@ const VIEWS =[['20-files', 'Files'], ['21-tasks', 'Tasks'], ['22-session-history
   const project = path.join(root, 'tour-project'); const bin = path.join(root, 'bin');
   const homes = { claude: path.join(root, 'claude'), codex: path.join(root, 'codex') };
   const storage = path.join(root, 'storage');
-  const env = { ...process.env, CODING_HUB_STORAGE_DIR: storage, CODING_HUB_TEST_HIDDEN: process.env.CODING_HUB_TEST_SHOW === '1' ? '0' : '1' };
+  const env = { ...process.env, CODING_HUB_STORAGE_DIR: storage, CODING_HUB_TEST_HIDDEN: TEST_HIDDEN };
   delete env.ELECTRON_RUN_AS_NODE;
   const pathKey = Object.keys(env).find((key) => key.toUpperCase() === 'PATH') ?? 'PATH'; env[pathKey] = bin + path.delimiter + env[pathKey];
   // os.homedir() reads USERPROFILE on Windows and HOME elsewhere: with both in the temp folder, no account, e-mail address,
