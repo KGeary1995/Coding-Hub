@@ -35,7 +35,7 @@ export interface AcpMcpServer { name: string; command: string; args: string[]; e
  */
 export interface AcpAgent { name: string; prefix: string; modes: Partial<Record<PermissionLevel, string>>; agy?: boolean; allowEdits?: boolean; mcpServers?: AcpMcpServer[]; allows?: (call: Record<string, unknown>, safeCommands: boolean) => boolean }
 /** `safeCommands`: the person's "Let agents run safe commands without asking" (on unless false). */
-export interface AcpOptions { cwd: string; model?: string; resumeId?: string; permissions?: PermissionLevel; confirmMs?: number; safeCommands?: boolean }
+export interface AcpOptions { cwd: string; model?: string; resumeId?: string; permissions?: PermissionLevel; confirmMs?: number; safeCommands?: boolean; /** Where its run tag comes from (random); a replay gives the same one (runner step 2). */ ids?: () => string }
 
 /**
  * A chat run over the Agent Client Protocol: JSON-RPC over the program's stdin and stdout, one message per line. Gemini
@@ -76,7 +76,7 @@ export class AcpStream implements ChatStream {
   private level: PermissionLevel;
   /** `model`: a model ID the agent offers ('' keeps its own). `resumeId`: the agent's session to load. */
   private model: string; private parts: { model: string; level: string };
-  constructor(private write: (line: string) => void, private emit: (event: ChatEvent) => void, private options: AcpOptions, private agent: AcpAgent) { this.level = options.permissions ?? 'ask'; this.model = options.model ?? ''; this.parts = modelParts(this.model); }
+  constructor(private write: (line: string) => void, private emit: (event: ChatEvent) => void, private options: AcpOptions, private agent: AcpAgent) { this.level = options.permissions ?? 'ask'; this.model = options.model ?? ''; this.parts = modelParts(this.model); this.run = (options.ids ?? randomUUID)().slice(0, 8); }
 
   /** The mode the run should be in now; undefined leaves the session's mode as it is. */
   private mode() { return (this.readOnly ? this.agent.modes.ask : this.agent.modes[this.level]) ?? this.startMode; }
@@ -246,7 +246,7 @@ export class AcpStream implements ChatStream {
    * 1.43.0 its first reply had the id of the first reply before the restart: the window joined it to that old message
    * (and dropped it when the text was the same), and the reply never showed.
    */
-  private readonly run = randomUUID().slice(0, 8);
+  private readonly run: string;
   private messageId() { if (!this.turn.messageId) this.turn.messageId = `${this.agent.prefix}-${this.sessionId ?? 'session'}-${this.run}-${this.turn.count}-${this.turn.segment}`; return this.turn.messageId; }
 
   private handle(message: Record<string, unknown>) {

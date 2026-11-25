@@ -52,9 +52,10 @@ export class ClaudeStream implements ChatStream {
   private modeRequests = new Map<string, { previous: PermissionLevel; seq: number }>(); private modeSeq = 0;
   /** Claude repeats its init with every turn, carrying the mode then in force: after Trace changed the mode, that is no longer the person's own. */
   private modeChanged = false;
-  constructor(private write: (line: string) => void, private emit: (event: ChatEvent) => void, private level: PermissionLevel = 'ask', private readonly launchLevel: PermissionLevel = level) {}
+  /** `ids`: where its request and message ids come from (random); a replay gives the same ones (runner step 2, docs/plans/runner-chat-channels.md). */
+  constructor(private write: (line: string) => void, private emit: (event: ChatEvent) => void, private level: PermissionLevel = 'ask', private readonly launchLevel: PermissionLevel = level, private readonly ids: () => string = randomUUID) {}
   private mode() { return this.level === 'ask' ? this.ownMode : CLAUDE_MODE[this.level]; }
-  private setMode(mode: string, previous: PermissionLevel = this.level) { this.modeChanged = true; const id = randomUUID(); this.modeRequests.set(id, { previous, seq: ++this.modeSeq }); this.line({ type: 'control_request', request_id: id, request: { subtype: 'set_permission_mode', mode } }); }
+  private setMode(mode: string, previous: PermissionLevel = this.level) { this.modeChanged = true; const id = this.ids(); this.modeRequests.set(id, { previous, seq: ++this.modeSeq }); this.line({ type: 'control_request', request_id: id, request: { subtype: 'set_permission_mode', mode } }); }
 
   /** A Round Table reviewer's plan mode wins over the channel's permissions until it drives again. */
   setReadOnly(readOnly: boolean) {
@@ -100,7 +101,7 @@ export class ClaudeStream implements ChatStream {
   push(data: string) { readLines(this.lines, data, 'Claude Code', this.emit, (message) => this.read(message)); }
 
   private line(value: unknown) { this.write(JSON.stringify(value) + '\n'); }
-  private control(request: Record<string, unknown>) { this.line({ type: 'control_request', request_id: randomUUID(), request }); }
+  private control(request: Record<string, unknown>) { this.line({ type: 'control_request', request_id: this.ids(), request }); }
 
   private read(message: Record<string, unknown>) {
     const type = message.type;
@@ -131,7 +132,7 @@ export class ClaudeStream implements ChatStream {
     if (type === 'stream_event') {
       const event = message.event as { type?: string; delta?: { type?: string; text?: string } } | undefined;
       const id = text((message as { message_id?: unknown }).message_id) || text((message.event as { message?: { id?: unknown } } | undefined)?.message?.id);
-      if (event?.type === 'message_start') this.streaming = text((event as { message?: { id?: unknown } }).message?.id) || randomUUID();
+      if (event?.type === 'message_start') this.streaming = text((event as { message?: { id?: unknown } }).message?.id) || this.ids();
       if (event?.type === 'content_block_delta' && event.delta?.type === 'text_delta' && event.delta.text) this.emit({ type: 'delta', messageId: id || this.streaming || 'streaming', text: event.delta.text });
       return;
     }
@@ -144,7 +145,7 @@ export class ClaudeStream implements ChatStream {
         else if (block.type === 'thinking' && text(block.thinking)) blocks.push({ type: 'thinking', text: text(block.thinking) });
         else if (block.type === 'tool_use') blocks.push({ type: 'tool', id: text(block.id), name: text(block.name), input: (block.input && typeof block.input === 'object' ? block.input : {}) as Record<string, unknown> });
       }
-      if (blocks.length) this.emit({ type: 'assistant', messageId: text(body?.id) || randomUUID(), blocks });
+      if (blocks.length) this.emit({ type: 'assistant', messageId: text(body?.id) || this.ids(), blocks });
       return;
     }
     if (type === 'user') {

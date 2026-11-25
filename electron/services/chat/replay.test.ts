@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import type { ChatEvent } from '../../../shared/chat';
 import { CodexStream } from './codex-stream';
+import { ClaudeStream } from './claude-stream';
+import { AcpStream } from './acp-stream';
 
 /**
  * Spike for runner step 4 (docs/plans/runner-chat-channels.md, step 1): can a chat's stream be rebuilt from a journal of
@@ -51,5 +53,22 @@ describe('replaying a chat from its journal (runner step 4 spike)', () => {
     expect(replayed).toEqual(events);
     // Without the turn id, Stop has nothing to name: it is only remembered for later.
     muted = false; fresh.interrupt(); expect(written).toEqual([]);
+  });
+});
+
+describe('ids a replay can give again (runner step 2)', () => {
+  const counter = () => { let n = 0; return () => `id-${++n}`; };
+  it('makes a Claude chat write the same requests, and name its messages the same, each time', () => {
+    const run = () => { const written: string[] = []; const events: ChatEvent[] = []; const stream = new ClaudeStream((line) => written.push(line), (event) => events.push(event), 'ask', 'ask', counter());
+      stream.setPermissions('edits'); stream.push(JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text: 'Hi' }] } }) + '\n'); return { written, events }; };
+    const first = run(); const second = run();
+    expect(second.written).toEqual(first.written); expect(JSON.parse(first.written[0])).toMatchObject({ type: 'control_request', request_id: 'id-1' });
+    expect(second.events).toEqual(first.events); expect(first.events.find((event) => event.type === 'assistant')).toMatchObject({ messageId: 'id-2' });
+  });
+  it('gives an ACP chat the same run tag, so its messages keep their ids', () => {
+    const tag = (ids?: () => string) => (new AcpStream(() => {}, () => {}, { cwd: '/p', ...(ids ? { ids } : {}) }, { name: 'Agent', prefix: 'agent', modes: {} }) as unknown as { run: string }).run;
+    expect(tag(counter())).toBe(tag(counter())); expect(tag(counter())).toBe('id-1');
+    // Without one it stays random, as before.
+    expect(tag()).not.toBe(tag());
   });
 });
