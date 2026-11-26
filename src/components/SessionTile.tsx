@@ -27,7 +27,7 @@ import { PastedImages } from './PastedImages';
 import { closeChannel, startSession, stopSession } from '../runtime/use-native-host';
 import { focusTerminal, submitTerminal, writeTerminal } from '../runtime/terminals';
 import { useHubStore, dollars } from '../state/hub-store';
-import { HANDOFF_DETAIL, HANDOFF_LABEL, handoffPhase, handoffShown, useHandoffStore } from '../state/handoff-store';
+import { HANDOFF_LABEL, handoffDetail, handoffPhase, handoffShown, useHandoffStore } from '../state/handoff-store';
 import { CHANNEL_STATES, channelState, channelTokensToday, limitRatio, usageFor } from '../state/channel-state';
 import { ScopeStrip } from './tile/ScopeStrip';
 import { EngineAvatar } from './tile/EngineAvatar';
@@ -115,9 +115,13 @@ export const SessionTile = memo(function SessionTile({ session, index }: { sessi
   // Counts, not the list: a change to another channel then does not draw this tile again.
   const sessionCount = useWorkspaceStore((s) => s.sessions.length); const channelCount = useWorkspaceStore((s) => channelsOf(s.sessions).length);
   const state = session.status === 'running' && seatWaiting ? 'waiting' as const : channelState(session, usage); const meta = CHANNEL_STATES[state];
-  // Near its limit: what Trace is doing about the handoff, or (where it cannot ask) the person's button to write one.
-  const handoff = useHandoffStore((s) => handoffPhase(s.bySession, session)); const automaticMemory = useHubStore((s) => s.preferences.automaticMemory);
-  const shown = state === 'limit' ? handoffShown(session, useWorkspaceStore.getState().sessions, usage, { automaticMemory }, handoff) : 'manual';
+  // Near its limit: what Trace is doing about the handoff, or (where it cannot ask) the person's button to write one. A
+  // hidden seat near its limit shows here too, while the lead itself works (Trace asks a seat on its own, from 1.47).
+  const limitSeatId = useHubStore((s) => state === 'working' ? hiddenSeats(useWorkspaceStore.getState().sessions, session.id).find((seat) => channelState(seat, usageFor(seat, s.usage)) === 'limit')?.id ?? null : null);
+  const handing = state === 'limit' ? session : limitSeatId ? useWorkspaceStore.getState().sessions.find((item) => item.id === limitSeatId) ?? null : null;
+  const handoff = useHandoffStore((s) => handing ? handoffPhase(s.bySession, handing) : undefined); const automaticMemory = useHubStore((s) => s.preferences.automaticMemory);
+  const shown = handing ? handoffShown(handing, useWorkspaceStore.getState().sessions, handing === session ? usage : usageFor(handing, useHubStore.getState().usage), { automaticMemory }, handoff) : 'manual';
+  const handoffTitle = handing ? `${handing === session ? '' : 'A seat at this Round Table is near the end of its context. '}${shown === 'manual' ? 'Write a handoff in Shared memory before the context runs out.' : `${handoffDetail(shown, handing)} Opens Shared memory.`}` : '';
   const context = usage?.context && usage.context.limit > 0 ? usage.context : null;
   // Claude reports the tokens in context but not its window, so only the amount can be shown.
   const contextUsed = !context && usage?.context && usage.context.used > 0 ? usage.context.used : null;
@@ -148,7 +152,7 @@ export const SessionTile = memo(function SessionTile({ session, index }: { sessi
   const action = state === 'idle' ? <button className="tr-action start" aria-label="Start channel" title="Start channel (Enter on the tile)" onClick={start}><Play size={12} aria-hidden="true" />Start<kbd aria-hidden="true">⏎</kbd></button>
     : state === 'waiting' ? <button className="tr-action waiting" aria-label="Answer in terminal" title="Go to this channel's terminal to answer the CLI" onClick={() => focusTerminal(session.id)}>Answer</button>
     : state === 'failed' ? <><button className="tr-action retry" onClick={start}>Retry</button><button className="tr-action ghost" onClick={openLog}>Open log</button></>
-    : state === 'limit' ? <button className="tr-action limit" title={shown === 'manual' ? 'Write a handoff in Shared memory before the context runs out.' : `${HANDOFF_DETAIL[shown]} Opens Shared memory.`} onClick={() => setView('memory')}>{HANDOFF_LABEL[shown]}</button>
+    : handing ? <button className="tr-action limit" title={handoffTitle} onClick={() => setView('memory')}>{HANDOFF_LABEL[shown]}</button>
     : state === 'finished' && !shell ? <button className="tr-action ghost" onClick={() => { useWorkspaceStore.setState({ reviewSessionId: session.id }); setView('diff'); }}>Review changes<kbd aria-hidden="true">G C</kbd></button>
     : null;
   // The channel's numbers: in its header when the tile is wide enough, else in its footer (tile.css).

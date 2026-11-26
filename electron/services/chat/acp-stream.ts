@@ -260,6 +260,9 @@ export class AcpStream implements ChatStream {
     const update = record(record(message.params).update); const kind = text(update.sessionUpdate);
     if (kind === 'config_option_update') { this.readConfig(update.configOptions); this.check(); return; }
     if (kind === 'current_mode_update') { this.config.mode = text(update.currentModeId) || this.config.mode; this.modeChanged(); return; }
+    // The context in use and its window (agy 1.5.16 sends `{ used, size }` with each turn, seen 2026-11-25): the run's
+    // context meter and automatic handoff. Only with a window: no share is made up without one.
+    if (kind === 'usage_update') { const { used, size } = update; if (typeof used === 'number' && typeof size === 'number' && Number.isInteger(used) && Number.isInteger(size) && size > 0 && used >= 0) this.emit({ type: 'context-window', size, used }); return; }
     if (this.replay && (kind === 'user_message_chunk' || kind === 'agent_message_chunk')) { this.replayed(kind === 'user_message_chunk' ? 'user' : 'assistant', text(record(update.content).text)); return; }
     if (!this.turn.busy) return;
     if (kind === 'agent_message_chunk') { const piece = text(record(update.content).text); if (piece) { this.turn.text += piece; this.emit({ type: 'delta', messageId: this.messageId(), text: piece }); } return; }

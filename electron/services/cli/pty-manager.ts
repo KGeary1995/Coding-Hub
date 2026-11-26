@@ -23,6 +23,8 @@ import { conptyOptions, nodePty, ptyProcessEnded } from './native-pty';
 import { CHAT_ARGS, ClaudeStream, type ChatStream } from '../chat/claude-stream';
 import { CodexStream, type CodexThreadOptions } from '../chat/codex-stream';
 import { GeminiStream } from '../chat/gemini-stream';
+import { GEMINI_MEMORY_SERVER } from '../hub/gemini-plugin';
+import { handoffRequest } from '../../../shared/hub';
 import { AcpStream, type AcpAgent } from '../chat/acp-stream';
 import { RoundTables, type TableHost } from '../chat/round-table';
 import { legacySeats, ReviewChains } from '../chat/review-chain';
@@ -171,7 +173,7 @@ export class PtyManager {
 
   constructor(
     private emit: (owner: number, event: SessionEvent) => void,
-    private dependencies: { onEventError?: () => void; /** The person's safe commands setting (on unless false), for Gemini chats. */ safeActions?: () => boolean; onContextWindow?: (runId: string, size: number) => void;stopDependencies?: StopDependencies; spawn?: Spawn; discover?: typeof discoverEngine; environment?: () => Record<string, string> | Promise<Record<string, string>>; profileEnvironment?: (base: Record<string, string>, id?: string) => Record<string, string>; onStarted?: (session: AgentRunningSession, config: AgentConfig, owner: number) => void; prepareLaunch?: (session: BuiltInRunningSession, config: CLIEngineConfig, info: EngineInfo, launch: { args: string[]; env: Record<string, string> }) => void;
+    private dependencies: { onEventError?: () => void; /** The person's safe commands setting (on unless false), for Gemini chats. */ safeActions?: () => boolean; onContextWindow?: (runId: string, size: number, used?: number) => void;stopDependencies?: StopDependencies; spawn?: Spawn; discover?: typeof discoverEngine; environment?: () => Record<string, string> | Promise<Record<string, string>>; profileEnvironment?: (base: Record<string, string>, id?: string) => Record<string, string>; onStarted?: (session: AgentRunningSession, config: AgentConfig, owner: number) => void; prepareLaunch?: (session: BuiltInRunningSession, config: CLIEngineConfig, info: EngineInfo, launch: { args: string[]; env: Record<string, string> }) => void;
       /**
        * Work an agent launch waits for before prepareLaunch (a project's shared memory brought up to date), started with
        * discovery. Its errors are ignored, and a launch waits at most `beforeLaunchMilliseconds` (default 3 s) for it.
@@ -462,7 +464,7 @@ export class PtyManager {
     const emit = (event: import('../../../shared/chat').ChatEvent) => {
       if (run.finished && event.type !== 'permission-done') return;
       // The window size goes with the run's usage (and from there to every view), not into the conversation.
-      if (event.type === 'context-window') { try { this.dependencies.onContextWindow?.(runId, event.size); } catch { this.dependencies.onEventError?.(); } return; }
+      if (event.type === 'context-window') { try { this.dependencies.onContextWindow?.(runId, event.size, event.used); } catch { this.dependencies.onEventError?.(); } return; }
       // A Round Table's reviewer asking to edit is declined at once: a line in the thread instead of an approval card.
       // At Full access its commands are allowed at once ('' : nothing to show), with no card or alert either.
       if (event.type === 'permission') { const handled = this.tables.observe({ sessionId, runId, event }) ?? this.chains.observe({ sessionId, runId, event }); if (handled !== null) { if (handled) emit({ type: 'notice', text: handled }); return; } }
@@ -557,6 +559,12 @@ export class PtyManager {
       if (this.chains.has(request.runId)) this.chains.send(request.runId, request.text, request.images); else this.tables.send(request.runId, request.text, request.images);
       try { this.dependencies.onChat?.(owner, { sessionId: request.sessionId, runId: request.runId, event: { type: 'user', text: request.text, images: request.images.length, ...(remote ? { remote: true as const } : {}) } }); } catch { this.dependencies.onEventError?.(); }
     }
+    else if (request.action === 'table-handoff' || request.action === 'table-compact') {
+      // A seat's automatic handoff: only at a discussion table (a hierarchy's steps keep every seat's turns their own).
+      if (!this.tables.leads(request.runId)) throw new HubError('TABLE_HANDOFF', 'Trace saves a seat\'s handoff by itself only at a discussion Round Table.');
+      const seat = find(request.seat); if (seat.owner !== owner) throw new HubError('STALE_SESSION', 'Those chats are not in the same window.');
+      this.tables.aside(request.runId, request.seat.runId, request.action === 'table-handoff' ? handoffRequest(request.percent, seat.session.engine === 'gemini' ? GEMINI_MEMORY_SERVER : undefined, true) : null);
+    }
     else if (request.action === 'table-plan') this.chains.plan(request.runId, request.approve, request.note);
     else if (request.action === 'table-continue') this.chains.continue(request.runId, request.skipChallenge === true);
     else if (request.action === 'table-review-again') this.chains.reviewAgain(request.runId);
@@ -586,6 +594,7 @@ export class PtyManager {
     setReadOnly: (runId, readOnly) => this.chatRun(runId)?.chat?.setReadOnly(readOnly),
     answer: (runId, requestId, allow) => { this.chatRun(runId)?.chat?.answer(requestId, allow); },
     interrupt: (runId) => this.chatRun(runId)?.chat?.interrupt(),
+    compact: (runId) => { const run = this.chatRun(runId); if (!run?.chat?.compact || run.turnOpen) return false; run.turnOpen = true; run.chat.compact(); return true; },
     emit: (owner, envelope) => { try { this.dependencies.onChat?.(owner, envelope); } catch { this.dependencies.onEventError?.(); } },
     stateOf: (cwd) => repositoryState(cwd),
   }; }

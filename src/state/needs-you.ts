@@ -5,7 +5,7 @@ import { waitingImageCount, type RoundTableState } from '../../shared/chat';
 import { hiddenSeatIds } from '../../shared/table-seats';
 import type { LinkedComputer } from '../../shared/remote';
 import { channelAlerts, usageFor } from './channel-state';
-import { HANDOFF_DETAIL, handoffPhase, handoffShown } from './handoff-store';
+import { HANDOFF_DETAIL, handoffDetail, handoffPhase, handoffShown } from './handoff-store';
 import { channelsOf } from './workspace-store';
 
 /**
@@ -33,7 +33,7 @@ export function needsYou(sessions: Session[], records: UsageRecord[], tasks: Tas
     else {
       // Near its context limit, a channel Trace saves the handoff for says so and opens the channel; else the person writes it.
       const shown = session ? handoffShown(session, sessions, usageFor(session, records), { automaticMemory: handoff.automaticMemory }, handoffPhase(handoff.phases, session)) : 'manual';
-      items.push({ key: `l:${alert.sessionId}`, kind: 'limit', title: alert.text, detail: HANDOFF_DETAIL[shown] + onTask, since: null, sessionId: alert.sessionId, taskId: task?.id ?? null, action: shown === 'manual' ? 'handoff' : 'open' });
+      items.push({ key: `l:${alert.sessionId}`, kind: 'limit', title: alert.text, detail: (session ? handoffDetail(shown, session) : HANDOFF_DETAIL[shown]) + onTask, since: null, sessionId: alert.sessionId, taskId: task?.id ?? null, action: shown === 'manual' ? 'handoff' : 'open' });
     }
   }
   // Channels whose agent finished a turn the person has not looked at yet (1.32.1), after everything that asks something.

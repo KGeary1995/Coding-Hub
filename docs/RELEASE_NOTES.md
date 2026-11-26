@@ -1,5 +1,9 @@
 ## What's new
 
+1.47.0 (not released yet).
+
+- **The automatic handoff now covers Round Table seats.** Near the end of its context, a Claude Code, Codex or Gemini seat at a discussion table is asked for its handoff on its own once the table rests, and a Claude Code or Codex seat is compacted once it is saved. Nothing of that turn goes to the other seats, and a message you send meanwhile waits for it. A Gemini seat now reports how full its context is; Trace cannot compact it, so its tile says the handoff is saved. A hidden seat shows on its lead's tile and in Needs you. Not tried yet with real agents at a table.
+
 1.46.0 organises channels by project, syncs your projects between computers, and makes controlling administrator apps over screen sharing safe.
 
 - **Channels by project.** The grid shows the open project's channels only. A channel belongs to the folder it works in (a worktree to the repository it came from). Opening another project keeps the open one's channels with it, and the other projects' channels keep running. The project menu lists each project with channels, and **All projects** shows every channel at once. A channel's status bar chip, Needs you or a notice opens its project. Changing a channel's folder in its settings no longer moves it out of sight while you type; it joins its new folder's project the next time you switch.

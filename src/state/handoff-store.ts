@@ -22,12 +22,26 @@ export const handoffPhase = (bySession: Record<string, { runId: string; phase: H
 /** The share of the context window in use (0 when the CLI has not reported both numbers). */
 export const contextShare = (usage: UsageRecord | undefined) => usage?.context && usage.context.limit > 0 ? usage.context.used / usage.context.limit : 0;
 
+/** The channel that leads the Round Table this one sits at (itself, when it leads one), or null. */
+export const tableLeadOf = (sessions: Session[], session: Session) => session.roundTable ? session : leadOf(sessions, session.id);
 /**
- * Whether Trace saves this channel's handoff itself: automatic memory on, a Claude Code or Codex channel not at a Round
- * Table (Gemini, seats and a token or cost budget are not asked), near the end of its context window.
+ * Whether Trace handles this agent's handoff: a Claude Code or Codex channel, or from 1.47 a Claude Code, Codex or
+ * Gemini seat (lead or hidden) of a discussion Round Table, which the table asks on its own while it rests. Not a
+ * hierarchy's seat (its steps hand every turn to the next seat), a custom agent, or a Gemini terminal (no context window).
+ */
+export function handoffHandled(session: Session, sessions: Session[]): boolean {
+  const lead = tableLeadOf(sessions, session); if (!lead) return isChatEngineConfig(session.config);
+  return lead.roundTable?.kind !== 'hierarchy' && (isChatEngineConfig(session.config) || (session.config.engine === 'gemini' && session.config.chat === true));
+}
+/** Whether Trace compacts the conversation once the handoff is saved: Gemini over ACP cannot (agy 1.5.16 took /compact as a message to its model, seen 2026-11-25). */
+export const handoffCompacts = (session: Session) => isChatEngineConfig(session.config);
+
+/**
+ * Whether Trace saves this channel's handoff itself: automatic memory on, an agent it handles (handoffHandled; a token
+ * or cost budget is not asked), near the end of its context window.
  */
 export function handoffAutomatic(session: Session, sessions: Session[], usage: UsageRecord | undefined, preferences: Pick<HubPreferences, 'automaticMemory'>): boolean {
-  if (preferences.automaticMemory === false || !isChatEngineConfig(session.config) || session.roundTable || leadOf(sessions, session.id)) return false;
+  if (preferences.automaticMemory === false || !handoffHandled(session, sessions)) return false;
   return contextShare(usage) >= LIMIT_THRESHOLD;
 }
 
@@ -44,3 +58,10 @@ export const HANDOFF_DETAIL: Record<HandoffShown, string> = {
   asked: 'Near the end of its context: Trace asked it to save a handoff, and compacts it once saved.',
   saved: 'Its handoff is saved in shared memory: Trace compacts it when its turn ends.',
 };
+/** The same for an agent Trace cannot compact (handoffCompacts): the handoff is saved, and a new conversation is the person's to start. */
+const UNCOMPACTED: Partial<Record<HandoffShown, string>> = {
+  'at-turn-end': 'Near the end of its context: Trace asks it to save a handoff when its turn ends. Trace cannot compact it, so start a new conversation before it runs out.',
+  asked: 'Near the end of its context: Trace asked it to save a handoff. Trace cannot compact it, so start a new conversation before it runs out.',
+  saved: 'Its handoff is saved in shared memory. Trace cannot compact it, so start a new conversation before it runs out.',
+};
+export const handoffDetail = (shown: HandoffShown, session: Session) => (!handoffCompacts(session) && UNCOMPACTED[shown]) || HANDOFF_DETAIL[shown];

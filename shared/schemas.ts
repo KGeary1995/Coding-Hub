@@ -157,6 +157,8 @@ export const chatRequestSchema = z.discriminatedUnion('action', [
   runReferenceSchema.extend({ action: z.literal('table-waiting'), send: z.boolean() }).strict(),
   runReferenceSchema.extend({ action: z.literal('table-next-drop'), index: z.number().int().min(0).max(9), head: z.string().min(1).max(200) }).strict(),
   runReferenceSchema.extend({ action: z.literal('table-send'), text: z.string().max(200_000), images: z.array(chatImage).max(10) }).strict(),
+  runReferenceSchema.extend({ action: z.literal('table-handoff'), seat: runReferenceSchema, percent: z.number().int().min(0).max(100) }).strict(),
+  runReferenceSchema.extend({ action: z.literal('table-compact'), seat: runReferenceSchema }).strict(),
   runReferenceSchema.extend({ action: z.literal('table-driver'), driver: z.enum(['claude', 'codex', 'gemini', 'custom']), seat: identifier.optional() }).strict(),
   runReferenceSchema.extend({ action: z.literal('table-rounds'), rounds: z.number().int().min(0).max(5) }).strict(),
   runReferenceSchema.extend({ action: z.literal('table-stop') }).strict(),

@@ -5,14 +5,14 @@ import { KEEP_IMAGES, RoundTables, type TableHost } from './round-table';
 const CLAUDE = '11111111-1111-4111-8111-111111111111'; const CODEX = '22222222-2222-4222-8222-222222222222';
 
 /** Two running chats in one folder; records what the coordinator sends and sets. */
-function setup(options: { cwd?: string; engines?: ['claude' | 'codex', 'claude' | 'codex'] } = {}) {
+function setup(options: { cwd?: string; engines?: ['claude' | 'codex', 'claude' | 'codex']; compacts?: boolean } = {}) {
   const [a, b] = options.engines ?? ['claude', 'codex'];
   const runs: Record<string, { sessionId: string; engine: 'claude' | 'codex'; cwd: string; owner: number; permissions?: 'ask' | 'edits' | 'full' }> = {
     [CLAUDE]: { sessionId: 'lead', engine: a, cwd: '/project', owner: 1 },
     [CODEX]: { sessionId: 'partner', engine: b, cwd: options.cwd ?? '/project', owner: 1 },
   };
   const sent: { runId: string; text: string }[] = []; const modes: Record<string, boolean> = {}; const answers: { runId: string; requestId: string; allow: boolean }[] = [];
-  const interrupted: string[] = []; const events: ChatEnvelope[] = [];
+  const interrupted: string[] = []; const events: ChatEnvelope[] = []; const compacted: string[] = [];
   const host: TableHost = {
     run: (runId) => runs[runId] ?? null,
     send: (runId, text) => { sent.push({ runId, text }); },
@@ -20,13 +20,14 @@ function setup(options: { cwd?: string; engines?: ['claude' | 'codex', 'claude' 
     answer: (runId, requestId, allow) => { answers.push({ runId, requestId, allow }); },
     interrupt: (runId) => { interrupted.push(runId); },
     emit: (_owner, envelope) => { events.push(envelope); },
+    ...(options.compacts === false ? {} : { compact: (runId: string) => { compacted.push(runId); return true; } }),
   };
   const tables = new RoundTables(host);
   const say = (runId: string, text: string) => { const event: ChatEvent = { type: 'assistant', messageId: `m-${Math.random()}`, blocks: [{ type: 'text', text }] }; tables.observe({ sessionId: runs[runId].sessionId, runId, event }); };
   const done = (runId: string) => tables.observe({ sessionId: runs[runId].sessionId, runId, event: { type: 'done', isError: false, error: null } });
   const observe = (runId: string, error: string | null) => tables.observe({ sessionId: runs[runId].sessionId, runId, event: { type: 'done', isError: error !== null, error } });
   const last = () => events.filter((envelope) => envelope.event.type === 'table').at(-1)!.event as Extract<ChatEvent, { type: 'table' }>;
-  return { tables, sent, modes, answers, interrupted, say, done, observe, last, runs, events };
+  return { tables, sent, modes, answers, interrupted, say, done, observe, last, runs, events, compacted };
 }
 
 describe('Round Table', () => {
@@ -370,5 +371,52 @@ describe('Round Table after a restart', () => {
     const big = setup(); big.tables.open(1, CLAUDE, CODEX, 'claude', 2); big.tables.send(CLAUDE, 'Go.', []);
     big.tables.send(CLAUDE, 'Look at these.', [{ mediaType: 'image/png', data: 'A'.repeat(KEEP_IMAGES + 4) }]);
     expect(big.last().table).toMatchObject({ waiting: 'Look at these.', waitingImagesDropped: 1 }); expect(big.last().table!.waitingImages).toBeUndefined();
+  });
+});
+
+describe('a seat’s turn aside: its automatic handoff (1.47)', () => {
+  const notices = (events: ChatEnvelope[]) => events.flatMap((envelope) => envelope.event.type === 'notice' ? [envelope.event.text] : []);
+  it('asks one seat alone while the table rests: nothing relayed, no answer, no round, nothing read into the record', () => {
+    const { tables, sent, say, done, last, events } = setup(); tables.open(1, CLAUDE, CODEX, 'claude', 2);
+    tables.aside(CLAUDE, CODEX, 'Save a handoff.');
+    expect(sent).toEqual([{ runId: CODEX, text: 'Save a handoff.' }]);
+    expect(notices(events).at(-1)).toBe('Codex\'s context is nearly full, so Trace asked it alone to save a handoff.');
+    say(CODEX, 'FINDING high src/a.ts:1 — saved the handoff'); done(CODEX);
+    // The reply goes to no other seat, starts no round and is no finding.
+    expect(sent).toHaveLength(1); expect(last().table).toMatchObject({ phase: 'idle', round: 0, findings: [] });
+    // The next message is the person's, to every seat, with nothing of the handoff turn in it.
+    tables.send(CLAUDE, 'Next question', []); expect(sent.slice(1).map((item) => item.runId)).toEqual([CLAUDE, CODEX]);
+    for (const item of sent.slice(1)) expect(item.text).not.toContain('saved the handoff');
+    expect(last().table).toMatchObject({ phase: 'answering', round: 0 });
+  });
+  it('keeps the person’s message waiting while the handoff turn runs, and sends it to every seat once it ends', () => {
+    const { tables, sent, done, last } = setup(); tables.open(1, CLAUDE, CODEX, 'claude', 1);
+    tables.aside(CLAUDE, CLAUDE, 'Save a handoff.');
+    tables.send(CLAUDE, 'Next question', []);
+    expect(sent).toHaveLength(1); expect(last().table).toMatchObject({ phase: 'idle', waiting: 'Next question' });
+    done(CLAUDE);
+    expect(sent.slice(1).map((item) => item.runId)).toEqual([CLAUDE, CODEX]); expect(sent[2].text).toContain('Next question');
+    expect(last().table).toMatchObject({ phase: 'answering' }); expect(last().table!.waiting).toBeUndefined();
+  });
+  it('is refused while a seat works, a message waits or the chat does not sit there, and changes nothing then', () => {
+    const { tables, sent, done } = setup(); tables.open(1, CLAUDE, CODEX, 'claude', 0);
+    tables.send(CLAUDE, 'Question', []); expect(sent).toHaveLength(2);
+    expect(() => tables.aside(CLAUDE, CODEX, 'Save a handoff.')).toThrow('at work');
+    // The driver finished (no rounds): one seat busy is enough to wait.
+    done(CLAUDE); expect(() => tables.aside(CLAUDE, CLAUDE, 'Save a handoff.')).toThrow('at work');
+    tables.send(CLAUDE, 'Queued', []); done(CODEX);
+    expect(() => tables.aside(CLAUDE, '33333333-3333-4333-8333-333333333333', 'Save a handoff.')).toThrow('does not sit');
+    expect(sent.filter((item) => item.text === 'Save a handoff.')).toEqual([]);
+    expect(() => tables.aside(CODEX, CODEX, 'Save a handoff.')).toThrow('no Round Table');
+  });
+  it('compacts a seat as a turn of its own, and says why; an agent that cannot compact is refused and stays free', () => {
+    const { tables, sent, done, compacted, events, last } = setup(); tables.open(1, CLAUDE, CODEX, 'claude', 1);
+    tables.aside(CLAUDE, CODEX, null);
+    expect(compacted).toEqual([CODEX]); expect(sent).toEqual([]); expect(notices(events).at(-1)).toContain('Codex\'s handoff is saved in shared memory, so Trace compacts its conversation');
+    tables.send(CLAUDE, 'After', []); expect(sent).toEqual([]); done(CODEX);
+    expect(sent.map((item) => item.runId)).toEqual([CLAUDE, CODEX]); expect(last().table).toMatchObject({ phase: 'answering' });
+    const plain = setup({ compacts: false }); plain.tables.open(1, CLAUDE, CODEX, 'claude', 1);
+    expect(() => plain.tables.aside(CLAUDE, CODEX, null)).toThrow('cannot compact');
+    plain.tables.send(CLAUDE, 'Now', []); expect(plain.sent.map((item) => item.runId)).toEqual([CLAUDE, CODEX]);
   });
 });

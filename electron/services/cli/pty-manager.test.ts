@@ -490,6 +490,29 @@ describe('Chat channels', () => {
     // Closed by the person (here from a phone), so the window also stops the hidden partner.
     manager.chatRemote({ action: 'table-close', ...lead }); expect(table().envelope.event).toEqual({ type: 'table', table: null, closed: true });
   });
+  it('gives a discussion seat its handoff and compaction as turns of its own (1.47), and only at a table its channel leads', async () => {
+    const processes: (FakePty & { onStderr: () => void })[] = []; const chats: ChatEnvelope[] = [];
+    const manager = new PtyManager(() => {}, { discover: async (engine) => engines(engine as 'claude' | 'codex'), environment: () => ({ PATH: '/bin' }), stopDependencies: { platform: 'linux', signalGroup: () => {} }, onChat: (_owner, envelope) => chats.push(envelope),
+      spawnChat: () => { const pty = Object.assign(new FakePty(), { onStderr: () => {} }); processes.push(pty); return pty as unknown as IPty; } });
+    managers.push(manager);
+    const lead = await manager.start(1, chatRequest('lead')); const seat = await manager.start(1, chatRequest('seat'));
+    const reference = { sessionId: lead.sessionId, runId: lead.runId }; const other = { sessionId: seat.sessionId, runId: seat.runId };
+    manager.chat(1, { action: 'table-open', ...reference, partner: other, driver: 'claude', rounds: 1 });
+    const sent = (index: number) => processes[index].write.mock.calls.map((call) => String(call[0])).filter((line) => line.includes('"type":"user"'));
+    manager.chat(1, { action: 'table-handoff', ...reference, seat: other, percent: 86 });
+    expect(sent(1)).toHaveLength(1); expect(sent(1)[0]).toContain('used 86% of its context window'); expect(sent(1)[0]).toContain('(coding-hub-memory)'); expect(sent(1)[0]).toContain('change nothing');
+    expect(sent(0)).toHaveLength(0);
+    // While it runs, another is refused and the person's message waits.
+    expect(() => manager.chat(1, { action: 'table-compact', ...reference, seat: other })).toThrow(/at work/);
+    manager.chat(1, { action: 'table-send', ...reference, text: 'Next', images: [] }); expect(sent(0)).toHaveLength(0);
+    processes[1].data(JSON.stringify({ type: 'result', subtype: 'success', is_error: false, result: 'Saved.' }) + '\n');
+    // Its end sends the person's message to both; the seat's reply went to nobody.
+    expect(sent(0)).toHaveLength(1); expect(sent(0)[0]).toContain('Next'); expect(sent(0)[0]).not.toContain('Saved.'); expect(sent(1)).toHaveLength(2);
+    // Only through the channel that leads a discussion table (a hierarchy's is refused the same way).
+    expect(() => manager.chat(1, { action: 'table-handoff', ...other, seat: reference, percent: 90 })).toThrow(/discussion Round Table/);
+    // An invalid share is refused before anything is sent.
+    expect(() => manager.chat(1, { action: 'table-handoff', ...reference, seat: other, percent: 140 })).toThrow(/Invalid chat request/);
+  });
   it('runs a read-only seat’s command at Full access without an approval card or alert, and asks at other levels', async () => {
     const processes: (FakePty & { onStderr: () => void })[] = []; const chats: ChatEnvelope[] = []; const events: SessionEvent[] = [];
     const permitting = (engine: CLIEngine) => { const found = engines(engine); found.info.supportsPermissions = true; return found; };
