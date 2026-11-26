@@ -813,6 +813,18 @@ const TEST_HIDDEN = process.env.CODING_HUB_TEST_HIDDEN === '1';
 if (TEST_HIDDEN && process.platform === 'darwin') { try { app.dock?.hide(); app.setActivationPolicy?.('accessory'); } catch { /* Set again once ready. */ } }
 // Nor does it open the person's browser: a link it would open is only noted (a test that checks one replaces this itself).
 if (TEST_HIDDEN) { const opened: string[] = []; (globalThis as { traceTestOpened?: string[] }).traceTestOpened = opened; shell.openExternal = async (url: string) => { opened.push(url); }; }
+// Nor a message box or file picker, which macOS shows even while the window is hidden (a test quitting with channels
+// left running asked whether to try again): each is answered with its safe choice and noted (a test that needs one
+// replaces it itself, as the smoke tests do with app.evaluate).
+if (TEST_HIDDEN) {
+  const asked: string[] = []; (globalThis as { traceTestDialogs?: string[] }).traceTestDialogs = asked;
+  const answer = (args: unknown[]) => { const options = (args.find((arg) => arg && typeof arg === 'object' && 'message' in (arg as object)) ?? {}) as Electron.MessageBoxOptions; asked.push(options.message ?? ''); return { response: options.cancelId ?? options.defaultId ?? 0, checkboxChecked: false }; };
+  dialog.showMessageBox = (async (...args: unknown[]) => answer(args)) as typeof dialog.showMessageBox;
+  dialog.showMessageBoxSync = ((...args: unknown[]) => answer(args).response) as typeof dialog.showMessageBoxSync;
+  dialog.showErrorBox = (title: string, content: string) => { asked.push(`${title}: ${content}`); };
+  dialog.showOpenDialog = (async () => ({ canceled: true, filePaths: [] })) as typeof dialog.showOpenDialog;
+  dialog.showSaveDialog = (async () => ({ canceled: true, filePath: '' })) as typeof dialog.showSaveDialog;
+}
 /** Opened at sign-in: the window waits hidden, with the tray icon, until the person opens it (only while closing the window keeps Trace running). */
 function startedHidden() {
   if (!closeToTray()) return false;
