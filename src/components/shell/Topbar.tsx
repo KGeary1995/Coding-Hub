@@ -18,7 +18,7 @@ import { MAX_CHANNELS } from '../../../shared/schemas';
 import { refreshAgents, useAgentStore } from '../../state/agent-store';
 import { EngineAvatar } from '../tile/EngineAvatar';
 import { useHubStore } from '../../state/hub-store';
-import { otherProjects, useAllProjects, useWorktrees, within } from '../../state/projects';
+import { folderName, otherProjects, projectLabel, setAllProjects, useAllProjects, useWorktrees, within } from '../../state/projects';
 import { cloneSyncedProject, useSyncedProjects } from '../../runtime/recent-projects';
 
 /** Daily views sit in the tab row; the rest are one menu away, grouped by how often they are used. */
@@ -71,15 +71,15 @@ export function Topbar({ explorer, onToggleExplorer }: { explorer: boolean; onTo
   /** The Round Table setup panel, opened by the two Round Table items; it outlives the menu that opened it. */
   const [setup, setSetup] = useState<TableKind | null>(null);
   const linkedComputers = useLinkedStore((state) => state.computers); const computerId = useWorkspaceStore((state) => state.computerId);
-  const project = rootDirectory?.split(/[\\/]/).filter(Boolean).at(-1) ?? null;
+  const allProjects = useAllProjects((state) => state.on); const project = projectLabel(rootDirectory, allProjects);
   // The project menu opens a recent project in one press (several projects, step 4); the open one is not listed.
   const recent = useHubStore((state) => state.preferences.recentProjects) ?? []; const worktrees = useWorktrees((state) => state.list); const synced = useSyncedProjects((state) => state.list); const cloneError = useSyncedProjects((state) => state.error);
   // The other projects with channels first (the grid shows only the active project's), then the recent ones.
   const withChannels = otherProjects(channelsOf(sessions), rootDirectory, worktrees);
-  const folderName = (directory: string) => directory.split(/[\\/]/).filter(Boolean).at(-1) ?? directory;
-  const allProjects = useAllProjects((state) => state.on); const pickProject = (folder: string) => { useAllProjects.setState({ on: false }); useWorkspaceStore.getState().setRootDirectory(folder); };
+  // Opening a project also ends All projects (projects.ts).
+  const pickProject = (folder: string) => useWorkspaceStore.getState().setRootDirectory(folder);
   const recentItems: MenuItem[] = [
-    ...(withChannels.length || allProjects ? [{ label: 'All projects', detail: allProjects ? 'Every project’s channels are shown' : 'Show every project’s channels at once', icon: <Folder size={16} aria-hidden="true" />, current: allProjects, onSelect: () => useAllProjects.setState({ on: !allProjects }) }] : []),
+    ...(withChannels.length || allProjects ? [{ label: 'All projects', detail: allProjects ? 'Every project’s channels are shown' : 'Show every project’s channels at once', icon: <Folder size={16} aria-hidden="true" />, current: allProjects, onSelect: () => setAllProjects(!allProjects) }] : []),
     ...withChannels.map(({ folder, channels }) => ({ label: folderName(folder), detail: `${channels} ${channels === 1 ? 'channel' : 'channels'} · ${folder}`, icon: <Folder size={16} aria-hidden="true" />, onSelect: () => pickProject(folder) })),
     ...(cloneError ? [{ label: 'Clone failed', detail: cloneError, onSelect: () => useSyncedProjects.setState({ error: null }) }] : []),
     ...synced.map((item) => ({ label: item.name, detail: `On ${item.machine} · ${item.repository} · clone here`, icon: <Folder size={16} aria-hidden="true" />, onSelect: () => void cloneSyncedProject(item).catch(() => {}) })),
@@ -124,7 +124,7 @@ export function Topbar({ explorer, onToggleExplorer }: { explorer: boolean; onTo
     <Wordmark />
     {/* A secondary button with a folder mark; the chosen tab beside it takes the accent (shell.css). */}
     {project
-      ? <MenuButton className="tr-project" buttonClassName="button secondary" ariaLabel={`Project ${project}`} label={<><Folder className="tr-project-icon" size={16} aria-hidden="true" /><span className="tr-project-name" title={rootDirectory ?? undefined}>{project}</span></>} items={[...recentItems, { label: 'Change project', icon: <FolderOpen size={16} aria-hidden="true" />, onSelect: () => void openProjectFolder() }, { label: 'Manage projects', icon: <FolderCog size={16} aria-hidden="true" />, onSelect: () => setView('projects') }]} />
+      ? <MenuButton className="tr-project" buttonClassName="button secondary" ariaLabel={`Project ${project}`} label={<><Folder className="tr-project-icon" size={16} aria-hidden="true" /><span className="tr-project-name" title={allProjects ? `New channels open in ${rootDirectory}` : rootDirectory ?? undefined}>{project}</span></>} items={[...recentItems, { label: 'Change project', icon: <FolderOpen size={16} aria-hidden="true" />, onSelect: () => void openProjectFolder() }, { label: 'Manage projects', icon: <FolderCog size={16} aria-hidden="true" />, onSelect: () => setView('projects') }]} />
       : <button className="tr-project button secondary" onClick={() => void openProjectFolder()}><Folder className="tr-project-icon" size={16} aria-hidden="true" />Open project</button>}
     <nav className="tr-tabs" aria-label="Main views">
       {PRIMARY_VIEWS.map(({ view, label }) => <button key={view} className={activeView === view ? 'active' : ''} aria-current={activeView === view ? 'page' : undefined} onClick={() => setView(view)}>{label}</button>)}

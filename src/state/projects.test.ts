@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Session } from '../../shared/types';
-import { channelProject, inActiveProject, mergeTiles, otherProjects, shownChannels, useShownChannels, useWorktrees, within } from './projects';
-import { useWorkspaceStore } from './workspace-store';
+import { channelProject, inActiveProject, mergeTiles, otherProjects, projectLabel, setAllProjects, shownChannels, useAllProjects, useShownChannels, useWorktrees, within } from './projects';
+import { arrangeTiles, useWorkspaceStore } from './workspace-store';
 
 const channel = (id: string, binding: Session['binding'] = { mode: 'workspace' }, patch: Partial<Session> = {}): Session => ({ id, title: id, config: { engine: 'shell' }, binding, status: 'idle', pid: null, runId: null, error: null, createdAt: '', endedAt: null, exitCode: null, logFile: null, ...patch } as Session);
 const tree = { id: 'w1', repository: '/code/alpha', directory: '/home/.coding-hub/worktrees/w1', branch: 'coding-hub/w1', createdAt: '' };
@@ -52,3 +52,25 @@ describe('a channel’s project (several projects, step 6)', () => {
   });
 });
 
+describe('All projects (the project menu)', () => {
+  it('names the project button All projects while it is on, and the open project’s folder otherwise', () => {
+    expect(projectLabel(null, false)).toBeNull(); expect(projectLabel(null, true)).toBeNull();
+    expect(projectLabel('/code/alpha/', false)).toBe('alpha'); expect(projectLabel('C:\\Code\\Beta', false)).toBe('Beta');
+    expect(projectLabel('/code/alpha', true)).toBe('All projects');
+  });
+  it('ends when a project opens, whichever way it was opened', () => {
+    useWorkspaceStore.setState({ rootDirectory: '/code/alpha', sessions: [] }); useAllProjects.setState({ on: true });
+    useWorkspaceStore.setState({ activeView: 'workspace' }); expect(useAllProjects.getState().on).toBe(true);
+    useWorkspaceStore.getState().setRootDirectory('/code/beta'); expect(useAllProjects.getState().on).toBe(false);
+  });
+  it('lays the tiles out again to fit when it is turned on or off, or another project opens', () => {
+    const dragged = [{ sessionId: 'a', x: 0, y: 0, w: 3, h: 10, minW: 3, minH: 10 }, { sessionId: 'b', x: 0, y: 40, w: 3, h: 10, minW: 3, minH: 10 }];
+    const sessions = [channel('a'), channel('b', { mode: 'independent', cwd: '/code/beta' })];
+    useWorkspaceStore.setState({ rootDirectory: '/code/alpha', sessions, layoutMode: 'grid', tiles: dragged });
+    setAllProjects(true); expect(useWorkspaceStore.getState().tiles).toEqual(arrangeTiles(sessions, 'grid'));
+    useWorkspaceStore.setState({ tiles: dragged }); setAllProjects(false); expect(useWorkspaceStore.getState().tiles).toEqual(arrangeTiles(sessions, 'grid'));
+    useWorkspaceStore.setState({ tiles: dragged }); useWorkspaceStore.getState().setRootDirectory('/code/beta'); expect(useWorkspaceStore.getState().tiles).toEqual(arrangeTiles(useWorkspaceStore.getState().sessions, 'grid'));
+    // The same project again: the person's own layout stays.
+    useWorkspaceStore.setState({ tiles: dragged }); useWorkspaceStore.getState().setRootDirectory('/code/beta'); expect(useWorkspaceStore.getState().tiles).toBe(dragged);
+  });
+});

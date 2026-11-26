@@ -1,6 +1,9 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { PlanLimits } from '../../../shared/plan-limits';
-import { accountWarnings, planReading, scrollToTile } from './StatusBar';
+import type { Session } from '../../../shared/types';
+import { useAllProjects, useWorktrees } from '../../state/projects';
+import { useWorkspaceStore } from '../../state/workspace-store';
+import { accountWarnings, jumpToChannel, planReading, scrollToTile } from './StatusBar';
 
 const reading = (extra: Partial<PlanLimits> = {}): PlanLimits => ({ engine: 'claude', account: 'Default', windows: [], plan: null, checkedAt: '2026-11-18T10:00:00.000Z', error: null, ...extra });
 const window = (label: string, usedPercent: number) => ({ label, usedPercent, resets: null });
@@ -54,4 +57,16 @@ describe('how far a grid scrolls to show the channel a person jumps to', () => {
     expect(scrollToTile({ top: 300, bottom: 1200 }, view)).toBe(248);
     expect(scrollToTile({ top: -100, bottom: 800 }, view)).toBe(-152);
   });
+});
+
+describe('jumping to a channel of another project', () => {
+  const channel = (id: string, cwd: string) => ({ id, title: id, config: { engine: 'shell' }, binding: { mode: 'independent', cwd }, status: 'idle', pid: null, runId: null, error: null, createdAt: '', endedAt: null, exitCode: null, logFile: null } as Session);
+  const jump = (all: boolean) => {
+    vi.stubGlobal('requestAnimationFrame', () => 0); useWorktrees.setState({ list: [], loaded: true });
+    useWorkspaceStore.setState({ rootDirectory: '/code/alpha', sessions: [channel('a', '/code/alpha'), channel('b', '/code/beta')], focusedSessionId: null });
+    useAllProjects.setState({ on: all }); jumpToChannel('b'); vi.unstubAllGlobals();
+    return useWorkspaceStore.getState().rootDirectory;
+  };
+  it('opens that project, so its tile is in the grid', () => { expect(jump(false)).toBe('/code/beta'); });
+  it('keeps the open project while All projects shows its tile already', () => { expect(jump(true)).toBe('/code/alpha'); expect(useAllProjects.getState().on).toBe(true); });
 });

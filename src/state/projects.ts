@@ -13,6 +13,12 @@ import { useWorkspaceStore } from './workspace-store';
 export const useWorktrees = create<{ list: ManagedWorktree[]; loaded: boolean }>(() => ({ list: [], loaded: false }));
 /** All projects in the grid at once (the project menu's All projects; the owner's choice of 2026-11-25), until a project is picked. */
 export const useAllProjects = create<{ on: boolean }>(() => ({ on: false }));
+/** Turns All projects on or off; every tile is laid out again, so the grid fits however many channels it then shows. */
+export function setAllProjects(on: boolean) { useAllProjects.setState({ on }); const state = useWorkspaceStore.getState(); state.arrange(state.layoutMode); }
+/** A folder's last part: the name a project goes by in the project menu. */
+export const folderName = (directory: string) => directory.split(/[\\/]/).filter(Boolean).at(-1) ?? directory;
+/** What the project button says: All projects while every project's channels show (it named the open one, 1.48.0). */
+export const projectLabel = (rootDirectory: string | null, all: boolean) => !rootDirectory ? null : all ? 'All projects' : folderName(rootDirectory);
 export async function refreshWorktrees() { const result = await window.codingHub?.projectTools({ action: 'worktree-list' }).catch(() => null); useWorktrees.setState({ list: result?.ok ? result.value as ManagedWorktree[] : useWorktrees.getState().list, loaded: true }); }
 
 const clean = (folder: string) => folder.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
@@ -38,7 +44,8 @@ export function otherProjects(channels: Session[], rootDirectory: string | null,
  * another project settles it again (`settled` null: worked out from the rule above).
  */
 export const useShownChannels = create<{ settled: { known: string[]; shown: string[] } | null }>(() => ({ settled: null }));
-useWorkspaceStore.subscribe((state, previous) => { if (state.rootDirectory !== previous.rootDirectory) useShownChannels.setState({ settled: null }); });
+// A project opened any way (the menu, Change project, Projects, a clone) also ends All projects.
+useWorkspaceStore.subscribe((state, previous) => { if (state.rootDirectory !== previous.rootDirectory) { useShownChannels.setState({ settled: null }); useAllProjects.setState({ on: false }); } });
 /** The channels shown: by the rule once, then as settled (new channels shown). Settles it when it is not. */
 export function shownChannels(channels: Session[], rootDirectory: string | null, worktrees: readonly ManagedWorktree[]): Session[] {
   const settled = useShownChannels.getState().settled;
