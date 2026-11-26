@@ -18,14 +18,11 @@ import { channelProject, inActiveProject, useAllProjects, useWorktrees } from '.
 export const compact = (value: number) => new Intl.NumberFormat('en', { notation: 'compact', maximumFractionDigits: 1 }).format(value).toLowerCase();
 
 /**
- * A channel's tile in the workspace's grid, or null where it is not drawn. Tiles stand in channel order, one to a
- * place, and a maximised one alone (SessionGrid); a place holds no tile when its drawing failed.
+ * A channel's tile in the workspace's grid, or null where it is not drawn: another project's, behind a maximised one, or
+ * its drawing failed. Found by its channel, not its place: the grid draws only the open project's channels (1.46.0).
  */
 export function channelTile(id: string): Element | null {
-  const { sessions, focusedSessionId } = useWorkspaceStore.getState(); const grid = document.querySelector('.session-grid-container');
-  const alone = grid?.querySelector('.focused-session');
-  const place = alone ? (focusedSessionId === id ? alone : null) : grid?.querySelectorAll('.session-grid > .react-grid-item:not(.react-grid-placeholder)')[channelsOf(sessions).findIndex((session) => session.id === id)];
-  return place?.querySelector('.session-tile') ?? null;
+  return document.querySelector('.session-grid-container')?.querySelector(`.session-tile[data-session="${CSS.escape(id)}"]`) ?? null;
 }
 
 /**

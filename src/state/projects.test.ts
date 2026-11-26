@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Session } from '../../shared/types';
-import { channelProject, inActiveProject, mergeTiles, otherProjects, projectLabel, setAllProjects, shownChannels, useAllProjects, useShownChannels, useWorktrees, within } from './projects';
+import { channelProject, inActiveProject, mergeTiles, otherProjects, shownTiles, projectLabel, setAllProjects, shownChannels, useAllProjects, useShownChannels, useWorktrees, within } from './projects';
 import { arrangeTiles, useWorkspaceStore } from './workspace-store';
 
 const channel = (id: string, binding: Session['binding'] = { mode: 'workspace' }, patch: Partial<Session> = {}): Session => ({ id, title: id, config: { engine: 'shell' }, binding, status: 'idle', pid: null, runId: null, error: null, createdAt: '', endedAt: null, exitCode: null, logFile: null, ...patch } as Session);
@@ -72,5 +72,20 @@ describe('All projects (the project menu)', () => {
     useWorkspaceStore.setState({ tiles: dragged }); useWorkspaceStore.getState().setRootDirectory('/code/beta'); expect(useWorkspaceStore.getState().tiles).toEqual(arrangeTiles(useWorkspaceStore.getState().sessions, 'grid'));
     // The same project again: the person's own layout stays.
     useWorkspaceStore.setState({ tiles: dragged }); useWorkspaceStore.getState().setRootDirectory('/code/beta'); expect(useWorkspaceStore.getState().tiles).toBe(dragged);
+    // A channel maximised in the last project is not kept so.
+    useWorkspaceStore.setState({ focusedSessionId: 'a' }); useWorkspaceStore.getState().setRootDirectory('/code/alpha'); expect(useWorkspaceStore.getState().focusedSessionId).toBeNull();
+  });
+});
+
+describe('the shown channels’ tiles while another project’s are hidden', () => {
+  const tile = (sessionId: string, x: number, y: number, w = 6, h = 12) => ({ sessionId, x, y, w, h, minW: 3, minH: 10 });
+  const shown = [channel('a'), channel('b')];
+  it('keep a layout made while they were shown (above the hidden ones)', () => {
+    const made = [tile('h', 0, 30), tile('a', 0, 0, 4), tile('b', 4, 0, 8, 20)];
+    expect(shownTiles(made, shown, 'grid')).toEqual([tile('a', 0, 0, 4), tile('b', 4, 0, 8, 20)]);
+  });
+  it('are laid out afresh among the hidden ones, or when one has no tile', () => {
+    expect(shownTiles([tile('a', 0, 0), tile('h', 6, 0), tile('b', 0, 12)], shown, 'grid')).toEqual(arrangeTiles(shown, 'grid'));
+    expect(shownTiles([tile('a', 0, 0), tile('h', 0, 12)], shown, 'grid')).toEqual(arrangeTiles(shown, 'grid'));
   });
 });

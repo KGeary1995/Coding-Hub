@@ -7,7 +7,7 @@ import { hiddenSeats, leadOf, useWorkspaceStore } from '../state/workspace-store
 import { hubCall, useHubStore } from '../state/hub-store';
 import { chatFailed, chatSent, useChatStore } from '../state/chat-store';
 import { submitTerminal } from './terminals';
-import { contextShare, handoffHandled, setHandoffPhase, tableLeadOf } from '../state/handoff-store';
+import { contextShare, handoffHandled, handoffPhase, setHandoffPhase, tableLeadOf, useHandoffStore } from '../state/handoff-store';
 import { channelDirectory } from '../state/channel-names';
 
 /**
@@ -58,6 +58,12 @@ async function written(session: Session, since: number): Promise<boolean> {
   } catch { return false; }
 }
 
+/**
+ * Back under the limit: a climb's phase ends, so the next climb starts with none (it said "Handoff saved" before it was
+ * asked). A compacted one is kept: the tile's details say "Handoff saved, then compacted" until the next ask replaces it.
+ */
+function settle(session: Session, runId: string) { const phase = handoffPhase(useHandoffStore.getState().bySession, session); if (phase && phase !== 'compacted') setHandoffPhase(session.id, runId, null); }
+
 /** After the turn that followed the request: compacts a channel whose agent saved its handoff. Returns whether it did. */
 async function compactAfterHandoff(session: Session, sessions: Session[]): Promise<boolean> {
   const runId = session.runId!; const pending = waiting.get(runId); if (!pending) return false;
@@ -65,11 +71,12 @@ async function compactAfterHandoff(session: Session, sessions: Session[]): Promi
   if (!isChatEngineConfig(session.config) || session.attention || session.status !== 'running' || session.roundTable || leadOf(sessions, session.id)) return false;
   if (!await written(session, pending.at)) return false;
   waiting.delete(runId); setHandoffPhase(session.id, runId, 'saved');
-  if (!session.config.chat) { const sent = await submitTerminal(session.id, '/compact'); if (sent) setHandoffPhase(session.id, runId, 'compacted'); return sent; }
+  // Refused (the terminal could not take it, or a turn started first): tried again when the next turn ends, as asked turns are.
+  if (!session.config.chat) { const sent = await submitTerminal(session.id, '/compact'); if (sent) setHandoffPhase(session.id, runId, 'compacted'); else waiting.set(runId, pending); return sent; }
   if (!window.codingHub) return false;
   chatSent(session.id, '/compact', []);
   const result = await window.codingHub.chat({ action: 'compact', sessionId: session.id, runId }).catch(() => null);
-  if (!result?.ok) { chatFailed(session.id, result && !result.ok ? result.error.message : 'The conversation could not be compacted.'); return false; }
+  if (!result?.ok) { chatFailed(session.id, result && !result.ok ? result.error.message : 'The conversation could not be compacted.'); waiting.set(runId, pending); return false; }
   setHandoffPhase(session.id, runId, 'compacted'); return true;
 }
 
@@ -81,7 +88,7 @@ export async function askForHandoff(sessionId: string, wait = 1500): Promise<boo
   const usage = usageFor(session, useHubStore.getState().usage); const runId = session.runId;
   if (await compactAfterHandoff(session, sessions)) return false;
   // Back under the limit (compacted): the next climb asks again.
-  if (contextShare(usage) < LIMIT_THRESHOLD) { asked.delete(runId); if (waiting.delete(runId)) setHandoffPhase(session.id, runId, null); return false; }
+  if (contextShare(usage) < LIMIT_THRESHOLD) { asked.delete(runId); waiting.delete(runId); settle(session, runId); return false; }
   if (asked.has(runId) || !handoffDue(session, sessions, usage, useHubStore.getState().preferences)) return false;
   asked.add(runId); waiting.set(runId, { at: Date.now(), turns: 0 }); const text = handoffRequest(Math.round(contextShare(usage) * 100));
   if (isChatEngineConfig(session.config) && session.config.chat && window.codingHub) {
@@ -122,7 +129,7 @@ async function tableHandoff(ended: Session, lead: Session): Promise<boolean> {
   for (const seat of seats) {
     const usage = usageFor(seat, records); const seatRun = seat.runId!;
     // Back under the limit (compacted): the next climb asks again.
-    if (contextShare(usage) < LIMIT_THRESHOLD) { asked.delete(seatRun); compacting.delete(seatRun); if (waiting.delete(seatRun)) setHandoffPhase(seat.id, seatRun, null); continue; }
+    if (contextShare(usage) < LIMIT_THRESHOLD) { asked.delete(seatRun); compacting.delete(seatRun); waiting.delete(seatRun); settle(seat, seatRun); continue; }
     if (asked.has(seatRun) || !handoffDue(seat, sessions, usage, preferences, table)) continue;
     asked.add(seatRun); waiting.set(seatRun, { at: Date.now(), turns: 0 });
     const result = await window.codingHub.chat({ ...reference(seat), action: 'table-handoff', percent: Math.min(100, Math.round(contextShare(usage) * 100)) }).catch(() => null);

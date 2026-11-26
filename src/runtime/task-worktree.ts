@@ -2,6 +2,7 @@ import { MAX_CHANNELS } from '../../shared/schemas';
 import type { ManagedWorktree } from '../../shared/project-tools';
 import { movedTask } from '../state/task-move';
 import { useWorkspaceStore } from '../state/workspace-store';
+import { refreshWorktrees } from '../state/projects';
 import { saveTask, sendTask, useTaskStore } from '../state/task-store';
 import { startSession } from './use-native-host';
 import { hubCall } from '../state/hub-store';
@@ -41,7 +42,8 @@ export async function startTaskInWorktree(id: string, engine: 'claude' | 'codex'
   useWorkspaceStore.getState().addChatSession(engine);
   const channel = useWorkspaceStore.getState().sessions.find((session) => !before.has(session.id));
   if (!channel) throw new Error(`The worktree ${tree.branch} is ready, but no channel could be added. Add one there by hand.`);
-  useWorkspaceStore.getState().updateBinding(channel.id, { mode: 'independent', cwd: tree.directory });
+  // The worktree known first, so the channel counts in its repository's project (projects.ts), not as one of its own.
+  await refreshWorktrees(); useWorkspaceStore.getState().updateBinding(channel.id, { mode: 'independent', cwd: tree.directory });
   await saveTask(movedTask(task, channel.id, tree.directory));
   await startSession(channel.id);
   const started = useWorkspaceStore.getState().sessions.find((session) => session.id === channel.id);

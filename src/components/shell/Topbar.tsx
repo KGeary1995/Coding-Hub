@@ -83,7 +83,7 @@ export function Topbar({ explorer, onToggleExplorer }: { explorer: boolean; onTo
     ...withChannels.map(({ folder, channels }) => ({ label: folderName(folder), detail: `${channels} ${channels === 1 ? 'channel' : 'channels'} · ${folder}`, icon: <Folder size={16} aria-hidden="true" />, onSelect: () => pickProject(folder) })),
     ...(cloneError ? [{ label: 'Clone failed', detail: cloneError, onSelect: () => useSyncedProjects.setState({ error: null }) }] : []),
     ...synced.map((item) => ({ label: item.name, detail: `On ${item.machine} · ${item.repository} · clone here`, icon: <Folder size={16} aria-hidden="true" />, onSelect: () => void cloneSyncedProject(item).catch(() => {}) })),
-    ...recent.filter((directory) => directory !== rootDirectory && !withChannels.some((item) => within(item.folder, directory) && within(directory, item.folder))).slice(0, 6).map((directory) => ({ label: folderName(directory), detail: directory, icon: <Folder size={16} aria-hidden="true" />, onSelect: () => pickProject(directory) })),
+    ...recent.filter((directory) => directory !== rootDirectory && !withChannels.some((item) => within(item.folder, directory) && within(directory, item.folder))).slice(0, 10).map((directory) => ({ label: folderName(directory), detail: directory, icon: <Folder size={16} aria-hidden="true" />, onSelect: () => pickProject(directory) })),
   ];
   const toItems = (views: { view: NavigationView; label: string; icon: LucideIcon }[]): MenuItem[] => views.map(({ view, label, icon: Icon }) => ({ label, icon: <Icon size={16} aria-hidden="true" />, current: activeView === view, onSelect: () => setView(view) }));
   const advanced = useAdvanced();

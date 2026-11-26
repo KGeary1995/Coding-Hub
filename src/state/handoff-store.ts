@@ -45,9 +45,11 @@ export function handoffAutomatic(session: Session, sessions: Session[], usage: U
 
 /** What a channel near its limit shows: `manual` asks the person to write the handoff; the others say what Trace is doing. */
 export type HandoffShown = 'manual' | 'at-turn-end' | 'asked' | 'saved';
-export function handoffShown(session: Session, sessions: Session[], usage: UsageRecord | undefined, preferences: Pick<HubPreferences, 'automaticMemory'>, phase?: HandoffPhase): HandoffShown {
-  if (phase === 'not-saved' || !handoffAutomatic(session, sessions, usage, preferences)) return 'manual';
-  return phase === 'asked' ? 'asked' : phase === 'saved' || phase === 'compacted' ? 'saved' : 'at-turn-end';
+/** `tableOpen`: whether the Round Table this agent sits at is open; Trace asks a seat only through an open table. */
+export function handoffShown(session: Session, sessions: Session[], usage: UsageRecord | undefined, preferences: Pick<HubPreferences, 'automaticMemory'>, phase?: HandoffPhase, tableOpen = true): HandoffShown {
+  if (phase === 'not-saved' || (!tableOpen && tableLeadOf(sessions, session)) || !handoffAutomatic(session, sessions, usage, preferences)) return 'manual';
+  // Compacted is the last climb's: at the limit again, Trace asks once more at turn end.
+  return phase === 'asked' ? 'asked' : phase === 'saved' ? 'saved' : 'at-turn-end';
 }
 export const HANDOFF_LABEL: Record<HandoffShown, string> = { manual: 'Write handoff', 'at-turn-end': 'Handoff at turn end', asked: 'Handoff asked', saved: 'Handoff saved' };
 export const HANDOFF_DETAIL: Record<HandoffShown, string> = {

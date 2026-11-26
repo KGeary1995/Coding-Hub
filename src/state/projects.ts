@@ -2,7 +2,7 @@ import { create } from 'zustand';
 import type { GridTile, Session } from '../../shared/types';
 import type { ManagedWorktree } from '../../shared/project-tools';
 import { channelDirectory } from './channel-names';
-import { useWorkspaceStore } from './workspace-store';
+import { arrangeTiles, useWorkspaceStore, type LayoutMode } from './workspace-store';
 
 /**
  * Several projects (step 6, docs/plans/several-projects.md; the owner's choice of 2026-11-25: the grid shows the active
@@ -52,6 +52,14 @@ export function shownChannels(channels: Session[], rootDirectory: string | null,
   // Settled once the worktrees are known (a worktree's channel belongs to its repository's project), not before.
   if (!settled) { const shown = channels.filter((session) => inActiveProject(session, rootDirectory, worktrees)); if (useWorktrees.getState().loaded) queueMicrotask(() => useShownChannels.setState({ settled: { known: channels.map((session) => session.id), shown: shown.map((session) => session.id) } })); return shown; }
   return channels.filter((session) => !settled.known.includes(session.id) || settled.shown.includes(session.id));
+}
+/**
+ * The shown channels' tiles while others are hidden: their saved places when they stand above every hidden one (as
+ * mergeTiles leaves them after a drag or resize), so a layout the person made is kept; else laid out afresh to fit.
+ */
+export function shownTiles(saved: GridTile[], shown: Session[], mode: LayoutMode): GridTile[] {
+  const ids = new Set(shown.map((session) => session.id)); const mine = saved.filter((tile) => ids.has(tile.sessionId)); const bottom = Math.max(0, ...mine.map((tile) => tile.y + tile.h));
+  return mine.length === ids.size && saved.every((tile) => ids.has(tile.sessionId) || tile.y >= bottom) ? mine : arrangeTiles(shown, mode);
 }
 /**
  * The saved tiles after the shown ones moved (the grid lays out only the shown ones, afresh from the top): the hidden

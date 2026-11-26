@@ -59,7 +59,7 @@ const key = (computerId: string, sessionId: string) => `${computerId}:${sessionI
 export function linkedTerminal(computerId: string, sessionId: string, engine: ChannelEngine, size: { cols: number | null; rows: number | null }): Entry {
   const id = key(computerId, sessionId); const existing = terminals.get(id); if (existing) return existing;
   const element = document.createElement('div'); element.className = 'terminal-surface linked-surface';
-  const terminal = new Terminal({ cols: size.cols ?? 100, rows: size.rows ?? 30, scrollback: 5000, fontFamily: TERMINAL_FONT, fontSize: terminalFontSize(useHubStore.getState().preferences.terminalFontSize), lineHeight: 1.3, allowProposedApi: true, theme: { ...TERMINAL_THEME, cursor: ENGINE_CURSOR[engine] } });
+  const terminal = new Terminal({ cols: size.cols ?? 100, rows: size.rows ?? 30, scrollback: 5000, fontFamily: TERMINAL_FONT, fontSize: terminalFontSize(useHubStore.getState().preferences.terminalFontSize, useHubStore.getState().preferences.terminalFontFit !== false), lineHeight: 1.3, allowProposedApi: true, theme: { ...TERMINAL_THEME, cursor: ENGINE_CURSOR[engine] } });
   measureLikeTheCLIs(terminal); terminal.open(element);
   const entry: Entry = { terminal, element, runId: null, queue: Promise.resolve(), failures: 0 };
   terminal.onData((data) => {

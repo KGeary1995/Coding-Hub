@@ -49,6 +49,25 @@ describe('asking an agent for a handoff near its context limit', () => {
   });
 });
 
+describe('a chat channel’s automatic handoff', () => {
+  afterEach(() => { vi.unstubAllGlobals(); useHandoffStore.setState({ bySession: {} }); });
+  it('tries a refused compaction again at the next turn’s end, keeps "compacted" back under the limit, and clears any other phase there', async () => {
+    const chats: Record<string, unknown>[] = []; let compact = { ok: false, error: { code: 'CHAT_BUSY', message: 'busy' } } as { ok: boolean; error?: { code: string; message: string } };
+    vi.stubGlobal('window', { codingHub: { chat: async (request: Record<string, unknown>) => { chats.push(request); return request.action === 'compact' ? compact : { ok: true, value: null }; }, hub: async (request: { action: string }) => ({ ok: true, value: request.action === 'memory-key' ? 'k' : [{ author: 'claude', createdAt: new Date(Date.now() + 1000).toISOString() }] }) } });
+    const one = session({ id: 'c1', runId: 'rc1', config: { engine: 'claude', chat: true, model: '', thinking: { budget_tokens: null }, tokenLimits: { maxOutputTokens: null, maxSessionTokens: null } } });
+    const at = (used: number) => useHubStore.setState({ usage: [{ ...usage(used, 1_000_000), sessionId: 'c1', runId: 'rc1' }], preferences: {} } as never);
+    useWorkspaceStore.setState({ sessions: [one], rootDirectory: '/p' } as never); at(850_000);
+    expect(await askForHandoff('c1', 0)).toBe(true); expect(useHandoffStore.getState().bySession.c1.phase).toBe('asked');
+    // Saved, but the compaction is refused (a turn started first): still saved, and tried again.
+    await askForHandoff('c1', 0); expect(useHandoffStore.getState().bySession.c1.phase).toBe('saved');
+    compact = { ok: true }; await askForHandoff('c1', 0); expect(useHandoffStore.getState().bySession.c1.phase).toBe('compacted');
+    expect(chats.filter((request) => request.action === 'compact')).toHaveLength(2);
+    // Back under the limit: the compaction is still told; another phase left from a climb is not.
+    at(30_000); await askForHandoff('c1', 0); expect(useHandoffStore.getState().bySession.c1.phase).toBe('compacted');
+    useHandoffStore.setState({ bySession: { c1: { runId: 'rc1', phase: 'saved' } } }); await askForHandoff('c1', 0); expect(useHandoffStore.getState().bySession.c1).toBeUndefined();
+  });
+});
+
 describe('a Round Table seat’s automatic handoff (1.47)', () => {
   const RUNS = { s1: '11111111-1111-4111-8111-111111111111', s2: '22222222-2222-4222-8222-222222222222', s3: '33333333-3333-4333-8333-333333333333' } as const;
   const idle: RoundTableState = { partner: { sessionId: 's2', runId: RUNS.s2, engine: 'codex' }, driver: 'claude', rounds: 2, round: 0, phase: 'idle', agreed: false };

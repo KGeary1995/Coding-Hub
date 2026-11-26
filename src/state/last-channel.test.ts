@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Session } from '../../shared/types';
 import { startingChoice, useChannel, useLastChannel } from './last-channel';
+import { useWorkspaceStore } from './workspace-store';
 
 const channel = (id: string, binding: Session['binding'] = { mode: 'workspace' }): Session => ({ id, title: id, config: { engine: 'shell' }, binding, status: 'idle', pid: null, runId: null, error: null, createdAt: '', endedAt: null, exitCode: null, logFile: null } as Session);
 
@@ -15,5 +16,9 @@ describe('where Changes and Files start', () => {
   });
   it('remembers the channel last used', () => {
     useChannel('other'); expect(useLastChannel.getState().sessionId).toBe('other');
+  });
+  it('forgets it when another project opens, so Changes and Files start at that project’s root', () => {
+    useWorkspaceStore.setState({ rootDirectory: '/project', sessions: [] }); useChannel('other');
+    useWorkspaceStore.getState().setRootDirectory('/project-b'); expect(useLastChannel.getState().sessionId).toBeNull();
   });
 });
