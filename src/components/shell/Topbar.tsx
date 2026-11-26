@@ -18,7 +18,7 @@ import { MAX_CHANNELS } from '../../../shared/schemas';
 import { refreshAgents, useAgentStore } from '../../state/agent-store';
 import { EngineAvatar } from '../tile/EngineAvatar';
 import { useHubStore } from '../../state/hub-store';
-import { folderName, otherProjects, projectLabel, setAllProjects, useAllProjects, useWorktrees, within } from '../../state/projects';
+import { folderName, openProject, otherProjects, projectLabel, setAllProjects, useAllProjects, useWorktrees, within } from '../../state/projects';
 import { cloneSyncedProject, useSyncedProjects } from '../../runtime/recent-projects';
 
 /** Daily views sit in the tab row; the rest are one menu away, grouped by how often they are used. */
@@ -48,7 +48,7 @@ export async function openProjectFolder() {
   const state = useWorkspaceStore.getState();
   if (!window.codingHub) { state.setView('projects'); return; }
   const selected = await window.codingHub.pickDirectory();
-  if (selected) state.setRootDirectory(selected);
+  if (selected) openProject(selected);
 }
 
 /** The keycap and the name; it leads back to the workspace. */
@@ -76,8 +76,7 @@ export function Topbar({ explorer, onToggleExplorer }: { explorer: boolean; onTo
   const recent = useHubStore((state) => state.preferences.recentProjects) ?? []; const worktrees = useWorktrees((state) => state.list); const synced = useSyncedProjects((state) => state.list); const cloneError = useSyncedProjects((state) => state.error);
   // The other projects with channels first (the grid shows only the active project's), then the recent ones.
   const withChannels = otherProjects(channelsOf(sessions), rootDirectory, worktrees);
-  // Opening a project also ends All projects (projects.ts).
-  const pickProject = (folder: string) => useWorkspaceStore.getState().setRootDirectory(folder);
+  const pickProject = openProject;
   const recentItems: MenuItem[] = [
     ...(withChannels.length || allProjects ? [{ label: 'All projects', detail: allProjects ? 'Every project’s channels are shown' : 'Show every project’s channels at once', icon: <Folder size={16} aria-hidden="true" />, current: allProjects, onSelect: () => setAllProjects(!allProjects) }] : []),
     ...withChannels.map(({ folder, channels }) => ({ label: folderName(folder), detail: `${channels} ${channels === 1 ? 'channel' : 'channels'} · ${folder}`, icon: <Folder size={16} aria-hidden="true" />, onSelect: () => pickProject(folder) })),

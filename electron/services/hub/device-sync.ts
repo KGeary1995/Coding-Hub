@@ -268,7 +268,8 @@ export class DeviceSync {
   /** Each computer writes its own projects file, as with usage, so two computers never conflict over the list. */
   private projects(folder: string) {
     const own = path.join(folder, 'projects', this.machine.id + '.json'); const projects = this.localProjects(); const hash = digest([folder, this.machine, projects]);
-    if (hash !== this.projectsHash || !fs.existsSync(own)) { writeJson(own, { version: 1, machine: this.machine, updatedAt: new Date().toISOString(), value: projects }); this.projectsHash = hash; }
+    // Origins still being read: a file already there waits for them rather than being written short (offers would vanish).
+    if ((hash !== this.projectsHash || !fs.existsSync(own)) && !(this.looking.size && fs.existsSync(own))) { writeJson(own, { version: 1, machine: this.machine, updatedAt: new Date().toISOString(), value: projects }); this.projectsHash = hash; }
     const directory = path.join(folder, 'projects'); const present = new Set<string>();
     for (const name of fs.readdirSync(directory)) {
       const match = /^([0-9a-f-]{36})\.json$/.exec(name); if (!match || match[1] === this.machine.id) continue;

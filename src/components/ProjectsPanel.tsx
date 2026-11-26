@@ -5,13 +5,14 @@ import { useState } from 'react';
 import { CircleAlert, FolderOpen, FolderPlus, Github, Info, Plus, RefreshCw, CircleUserRound, SearchX } from 'lucide-react';
 import type { GitHubRepository, ProjectRequest, ProjectResponse } from '../../shared/projects';
 import { useWorkspaceStore } from '../state/workspace-store';
+import { openProject } from '../state/projects';
 import { examplePath } from './platform';
 export function ProjectsPanel() {
   const [path, setPath] = useState(''); const [parent, setParent] = useState(''); const [name, setName] = useState('my-project'); const [initializeGit, setInitializeGit] = useState(true);
   const [owner, setOwner] = useState(''); const [query, setQuery] = useState(''); const [repos, setRepos] = useState<GitHubRepository[]>([]); const [loaded, setLoaded] = useState(false); const [busy, setBusy] = useState(false); const [error, setError] = useState('');
   async function call(request: ProjectRequest): Promise<ProjectResponse> { if (!window.codingHub) throw new Error('Project setup requires the desktop app.'); const result = await window.codingHub.projects(request); if (!result.ok) throw new Error(result.error.message); return result.value; }
   async function run(operation: () => Promise<void>) { if (busy) return; setBusy(true); setError(''); try { await operation(); } catch (e) { setError(e instanceof Error ? e.message : 'Project setup failed.'); } finally { setBusy(false); } }
-  function open(directory: string) { useWorkspaceStore.getState().setRootDirectory(directory); useWorkspaceStore.getState().setView('workspace'); }
+  function open(directory: string) { openProject(directory); useWorkspaceStore.getState().setView('workspace'); }
   async function browse(target: 'open' | 'parent') { const selected = await window.codingHub?.pickDirectory(); if (selected) { if (target === 'open') open(selected); else setParent(selected); } }
   const shown = repos.filter((repo) => repo.nameWithOwner.toLowerCase().includes(query.trim().toLowerCase()));
   return <section className="feature-panel hub-panel ui-page tr-projects">

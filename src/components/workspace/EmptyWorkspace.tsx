@@ -3,6 +3,7 @@ import { CircleAlert, Cpu, Folder, FolderOpen, FolderPlus, Github, History, type
 import type { AccountConnection } from '../../../shared/accounts';
 import type { SessionHistoryRun } from '../../../shared/types';
 import { useWorkspaceStore } from '../../state/workspace-store';
+import { openProject } from '../../state/projects';
 import { openProjectFolder } from '../shell/Topbar';
 import { MOD_KEY } from '../platform';
 import { TraceMark } from '../shell/TraceMark';
@@ -44,7 +45,7 @@ const ENGINE_MARKS: Record<AccountConnection['provider'], { icon: LucideIcon; to
 
 /** Workspace with no project: a centred welcome with the ways in, then recent folders and what is installed. */
 export function EmptyWorkspace({ onSkip }: { onSkip: () => void }) {
-  const { setRootDirectory, setView } = useWorkspaceStore();
+  const { setView } = useWorkspaceStore();
   /** null while loading; the browser preview has no history, so it starts empty. */
   const [recent, setRecent] = useState<{ directory: string; at: string }[] | null>(() => window.codingHub ? null : []);
   const [engines, setEngines] = useState<AccountConnection[] | null>(null);
@@ -89,7 +90,7 @@ export function EmptyWorkspace({ onSkip }: { onSkip: () => void }) {
         <div className="ui-card-head"><History aria-hidden="true" /><h2 id="tr-recent-title">Recent projects</h2>{!!recent?.length && <span className="ui-count neutral">{recent.length}</span>}</div>
         {recentError ? <div className="ui-empty danger" role="alert"><CircleAlert aria-hidden="true" /><h3>Recent projects unavailable</h3><p>{recentError}</p></div>
           : !recent ? <div className="ui-empty" role="status"><History aria-hidden="true" /><h3>Loading recent projects</h3><p>Looking for folders you ran channels in.</p></div>
-          : recent.length ? <ul className="ui-list">{recent.map(({ directory, at }) => <li key={directory}><button className="ui-row" onClick={() => setRootDirectory(directory)} title={`Open ${directory}`}><span className="ui-avatar neutral" aria-hidden="true"><Folder /></span><span className="ui-row-main"><strong>{folderName(directory)}</strong><small className="tr-row-path">{directory}</small></span><small className="tr-row-meta">{ago(at)}</small></button></li>)}</ul>
+          : recent.length ? <ul className="ui-list">{recent.map(({ directory, at }) => <li key={directory}><button className="ui-row" onClick={() => openProject(directory)} title={`Open ${directory}`}><span className="ui-avatar neutral" aria-hidden="true"><Folder /></span><span className="ui-row-main"><strong>{folderName(directory)}</strong><small className="tr-row-path">{directory}</small></span><small className="tr-row-meta">{ago(at)}</small></button></li>)}</ul>
           : <div className="ui-empty"><History aria-hidden="true" /><h3>No recent projects</h3><p>Folders you run channels in appear here.</p></div>}
       </section>
       <section className="ui-card span-6" aria-labelledby="tr-engines-title">

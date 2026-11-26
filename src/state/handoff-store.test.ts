@@ -15,8 +15,9 @@ describe('what a channel near its limit shows about its handoff', () => {
     const one = session(); const full = usage(850_000, 1_000_000);
     expect(handoffShown(one, [one], full, {})).toBe('at-turn-end');
     expect(handoffShown(one, [one], full, {}, 'asked')).toBe('asked');
-    expect(handoffShown(one, [one], full, {}, 'saved')).toBe('saved'); // Compacted was the last climb's: at the limit again, it is asked at turn end.
-    expect(handoffShown(one, [one], full, {}, 'compacted')).toBe('at-turn-end');
+    expect(handoffShown(one, [one], full, {}, 'saved')).toBe('saved'); expect(handoffShown(one, [one], full, {}, 'compacted')).toBe('saved');
+    // Compacted on a climb that ended: at the limit again, it is asked at turn end.
+    expect(handoffShown(one, [one], full, {}, 'earlier')).toBe('at-turn-end');
     // The agent ended three turns without saving it: the person's to write.
     expect(handoffShown(one, [one], full, {}, 'not-saved')).toBe('manual');
     expect(HANDOFF_LABEL['at-turn-end']).toBe('Handoff at turn end'); expect(HANDOFF_LABEL.manual).toBe('Write handoff');
@@ -37,7 +38,7 @@ describe('what a channel near its limit shows about its handoff', () => {
     const gemini = session({ id: 's3', config: { engine: 'gemini', chat: true, model: '' } }); const all = [lead, codex, gemini];
     const seated = { ...lead, roundTable: { ...lead.roundTable!, seats: [{ session: 's1' }, { session: 's2' }, { session: 's3' }] } }; const table = [seated, codex, gemini];
     expect(handoffShown(lead, all, full, {})).toBe('at-turn-end'); expect(handoffShown(codex, table, full, {}, 'asked')).toBe('asked'); expect(handoffShown(gemini, table, full, {}, 'saved')).toBe('saved');
-    expect(handoffShown(gemini, table, full, {})).toBe('at-turn-end'); expect(handoffShown(gemini, table, full, {}, 'compacted')).toBe('at-turn-end');
+    expect(handoffShown(gemini, table, full, {})).toBe('at-turn-end'); expect(handoffShown(gemini, table, full, {}, 'compacted')).toBe('saved'); expect(handoffShown(gemini, table, full, {}, 'earlier')).toBe('at-turn-end');
     // The table is not open (a seat stopped, or it closed with findings kept): Trace cannot ask, so the person writes it.
     expect(handoffShown(lead, all, full, {}, undefined, false)).toBe('manual'); expect(handoffShown(codex, table, full, {}, 'saved', false)).toBe('manual');
     const plain = session(); expect(handoffShown(plain, [plain], full, {}, undefined, false)).toBe('at-turn-end');

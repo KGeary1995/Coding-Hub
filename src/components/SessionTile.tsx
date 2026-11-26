@@ -120,7 +120,7 @@ export const SessionTile = memo(function SessionTile({ session, index }: { sessi
   const handing = state === 'limit' ? session : limitSeatId ? useWorkspaceStore.getState().sessions.find((item) => item.id === limitSeatId) ?? null : null;
   const handoff = useHandoffStore((s) => handing ? handoffPhase(s.bySession, handing) : undefined);
   // Its own last compaction, also once it is back under the limit (where `handing` is null).
-  const compacted = useHandoffStore((s) => handoffPhase(s.bySession, session) === 'compacted'); const automaticMemory = useHubStore((s) => s.preferences.automaticMemory);
+  const compacted = useHandoffStore((s) => { const phase = handoffPhase(s.bySession, session); return phase === 'compacted' || phase === 'earlier'; }); const automaticMemory = useHubStore((s) => s.preferences.automaticMemory);
   const shown = handing ? handoffShown(handing, useWorkspaceStore.getState().sessions, handing === session ? usage : usageFor(handing, useHubStore.getState().usage), { automaticMemory }, handoff, leadsTable) : 'manual';
   const handoffTitle = handing ? `${handing === session ? '' : 'A seat at this Round Table is near the end of its context. '}${shown === 'manual' ? 'Write a handoff in Shared memory before the context runs out.' : `${HANDOFF_DETAIL[shown]} Opens Shared memory.`}` : '';
   const context = usage?.context && usage.context.limit > 0 ? usage.context : null;

@@ -2,7 +2,7 @@ import { create } from 'zustand';
 import type { GridTile, Session } from '../../shared/types';
 import type { ManagedWorktree } from '../../shared/project-tools';
 import { channelDirectory } from './channel-names';
-import { arrangeTiles, useWorkspaceStore, type LayoutMode } from './workspace-store';
+import { arrangeTiles, standArranged, useWorkspaceStore, type LayoutMode } from './workspace-store';
 
 /**
  * Several projects (step 6, docs/plans/several-projects.md; the owner's choice of 2026-11-25: the grid shows the active
@@ -13,8 +13,16 @@ import { arrangeTiles, useWorkspaceStore, type LayoutMode } from './workspace-st
 export const useWorktrees = create<{ list: ManagedWorktree[]; loaded: boolean }>(() => ({ list: [], loaded: false }));
 /** All projects in the grid at once (the project menu's All projects; the owner's choice of 2026-11-25), until a project is picked. */
 export const useAllProjects = create<{ on: boolean }>(() => ({ on: false }));
-/** Turns All projects on or off; every tile is laid out again, so the grid fits however many channels it then shows. */
-export function setAllProjects(on: boolean) { useAllProjects.setState({ on }); const state = useWorkspaceStore.getState(); state.arrange(state.layoutMode); }
+/**
+ * Turns All projects on or off; every tile is laid out again, so the grid fits however many channels it then shows. Off,
+ * a maximised channel of another project is not kept so (it is hidden, but notices and jumps went by it).
+ */
+export function setAllProjects(on: boolean) {
+  useAllProjects.setState({ on }); const state = useWorkspaceStore.getState(); state.arrange(state.layoutMode);
+  const focused = !on && state.sessions.find((session) => session.id === state.focusedSessionId); if (focused && !inActiveProject(focused, state.rootDirectory, useWorktrees.getState().list)) useWorkspaceStore.setState({ focusedSessionId: null });
+}
+/** Opens a project, ending All projects even when it is the one open (setRootDirectory's own change ends it otherwise). */
+export function openProject(directory: string) { if (useAllProjects.getState().on) setAllProjects(false); useWorkspaceStore.getState().setRootDirectory(directory); }
 /** A folder's last part: the name a project goes by in the project menu. */
 export const folderName = (directory: string) => directory.split(/[\\/]/).filter(Boolean).at(-1) ?? directory;
 /** What the project button says: All projects while every project's channels show (it named the open one, 1.48.0). */
@@ -55,11 +63,12 @@ export function shownChannels(channels: Session[], rootDirectory: string | null,
 }
 /**
  * The shown channels' tiles while others are hidden: their saved places when they stand above every hidden one (as
- * mergeTiles leaves them after a drag or resize), so a layout the person made is kept; else laid out afresh to fit.
+ * mergeTiles leaves them after a drag or resize), so a layout the person made is kept; else laid out afresh to fit. Every
+ * channel as Trace arranged them is not the person's: the shown ones' share of it would leave the rest of the grid empty.
  */
 export function shownTiles(saved: GridTile[], shown: Session[], mode: LayoutMode): GridTile[] {
   const ids = new Set(shown.map((session) => session.id)); const mine = saved.filter((tile) => ids.has(tile.sessionId)); const bottom = Math.max(0, ...mine.map((tile) => tile.y + tile.h));
-  return mine.length === ids.size && saved.every((tile) => ids.has(tile.sessionId) || tile.y >= bottom) ? mine : arrangeTiles(shown, mode);
+  return mine.length === ids.size && !standArranged(saved, mode) && saved.every((tile) => ids.has(tile.sessionId) || tile.y >= bottom) ? mine : arrangeTiles(shown, mode);
 }
 /**
  * The saved tiles after the shown ones moved (the grid lays out only the shown ones, afresh from the top): the hidden

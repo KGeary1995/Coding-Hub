@@ -40,8 +40,11 @@ export { handoffRequest };
 
 /** Runs asked since their context last was under the limit. */
 const asked = new Set<string>();
-/** Runs asked and not yet compacted: when they were asked, and how many turns have ended since (it is given up after three). */
-const waiting = new Map<string, { at: number; turns: number }>();
+/**
+ * Runs asked and not yet compacted: when they were asked, and how many turns have ended since (it is given up after three
+ * unless saved). `saved`: the handoff is in memory and the compaction was refused as busy, so it is tried again.
+ */
+const waiting = new Map<string, { at: number; turns: number; saved?: boolean }>();
 
 /** Seats whose handoff is saved, still to be compacted once their table rests. */
 const compacting = new Set<string>();
@@ -60,23 +63,24 @@ async function written(session: Session, since: number): Promise<boolean> {
 
 /**
  * Back under the limit: a climb's phase ends, so the next climb starts with none (it said "Handoff saved" before it was
- * asked). A compacted one is kept: the tile's details say "Handoff saved, then compacted" until the next ask replaces it.
+ * asked). A compaction is kept as an earlier one: the tile's details still say "Handoff saved, then compacted", and a
+ * next climb is shown as asked at turn end.
  */
-function settle(session: Session, runId: string) { const phase = handoffPhase(useHandoffStore.getState().bySession, session); if (phase && phase !== 'compacted') setHandoffPhase(session.id, runId, null); }
+function settle(session: Session, runId: string) { const phase = handoffPhase(useHandoffStore.getState().bySession, session); if (phase && phase !== 'earlier') setHandoffPhase(session.id, runId, phase === 'compacted' ? 'earlier' : null); }
 
 /** After the turn that followed the request: compacts a channel whose agent saved its handoff. Returns whether it did. */
 async function compactAfterHandoff(session: Session, sessions: Session[]): Promise<boolean> {
   const runId = session.runId!; const pending = waiting.get(runId); if (!pending) return false;
-  if (++pending.turns > 3) { waiting.delete(runId); setHandoffPhase(session.id, runId, 'not-saved'); return false; }
+  if (!pending.saved && ++pending.turns > 3) { waiting.delete(runId); setHandoffPhase(session.id, runId, 'not-saved'); return false; }
   if (!isChatEngineConfig(session.config) || session.attention || session.status !== 'running' || session.roundTable || leadOf(sessions, session.id)) return false;
-  if (!await written(session, pending.at)) return false;
+  if (!pending.saved && !await written(session, pending.at)) return false;
   waiting.delete(runId); setHandoffPhase(session.id, runId, 'saved');
-  // Refused (the terminal could not take it, or a turn started first): tried again when the next turn ends, as asked turns are.
-  if (!session.config.chat) { const sent = await submitTerminal(session.id, '/compact'); if (sent) setHandoffPhase(session.id, runId, 'compacted'); else waiting.set(runId, pending); return sent; }
+  // Refused as busy (the terminal could not take it, or a turn started first): tried again when the next turn ends.
+  if (!session.config.chat) { const sent = await submitTerminal(session.id, '/compact'); if (sent) setHandoffPhase(session.id, runId, 'compacted'); else waiting.set(runId, { ...pending, saved: true }); return sent; }
   if (!window.codingHub) return false;
   chatSent(session.id, '/compact', []);
   const result = await window.codingHub.chat({ action: 'compact', sessionId: session.id, runId }).catch(() => null);
-  if (!result?.ok) { chatFailed(session.id, result && !result.ok ? result.error.message : 'The conversation could not be compacted.'); waiting.set(runId, pending); return false; }
+  if (!result?.ok) { chatFailed(session.id, result && !result.ok ? result.error.message : 'The conversation could not be compacted.'); if (result && !result.ok && result.error.code === 'CHAT_BUSY') waiting.set(runId, { ...pending, saved: true }); return false; }
   setHandoffPhase(session.id, runId, 'compacted'); return true;
 }
 

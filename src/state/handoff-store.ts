@@ -8,9 +8,10 @@ import { leadOf } from './workspace-store';
 /**
  * How far the automatic handoff (runtime/auto-handoff.ts) has got for a channel's run, so its tile and Needs you say what
  * Trace is doing instead of asking the person to write one: asked, saved (in the project's memory), compacted, or
- * not saved (the agent ended three turns without saving it; then it is the person's to write).
+ * not saved (the agent ended three turns without saving it; then it is the person's to write), or earlier: compacted on
+ * a climb that has ended (back under the limit), so a next climb starts afresh.
  */
-export type HandoffPhase = 'asked' | 'saved' | 'compacted' | 'not-saved';
+export type HandoffPhase = 'asked' | 'saved' | 'compacted' | 'not-saved' | 'earlier';
 /** By channel, with the run it belongs to: a restarted channel's new run starts with none. */
 export const useHandoffStore = create<{ bySession: Record<string, { runId: string; phase: HandoffPhase }> }>(() => ({ bySession: {} }));
 export function setHandoffPhase(sessionId: string, runId: string, phase: HandoffPhase | null) {
@@ -48,8 +49,8 @@ export type HandoffShown = 'manual' | 'at-turn-end' | 'asked' | 'saved';
 /** `tableOpen`: whether the Round Table this agent sits at is open; Trace asks a seat only through an open table. */
 export function handoffShown(session: Session, sessions: Session[], usage: UsageRecord | undefined, preferences: Pick<HubPreferences, 'automaticMemory'>, phase?: HandoffPhase, tableOpen = true): HandoffShown {
   if (phase === 'not-saved' || (!tableOpen && tableLeadOf(sessions, session)) || !handoffAutomatic(session, sessions, usage, preferences)) return 'manual';
-  // Compacted is the last climb's: at the limit again, Trace asks once more at turn end.
-  return phase === 'asked' ? 'asked' : phase === 'saved' ? 'saved' : 'at-turn-end';
+  // Compacted while the context still reads full: saved (it drops once compacted). An earlier climb's: asked again at turn end.
+  return phase === 'asked' ? 'asked' : phase === 'saved' || phase === 'compacted' ? 'saved' : 'at-turn-end';
 }
 export const HANDOFF_LABEL: Record<HandoffShown, string> = { manual: 'Write handoff', 'at-turn-end': 'Handoff at turn end', asked: 'Handoff asked', saved: 'Handoff saved' };
 export const HANDOFF_DETAIL: Record<HandoffShown, string> = {

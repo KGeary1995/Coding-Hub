@@ -334,4 +334,17 @@ describe('projects between computers (several projects; the owner’s choice of 
     expect(pc.sync.syncedProjects()).toEqual([]);
     expect(mac.sync.syncedProjects()).toEqual([]);
   });
+  it('reads a project without a GitHub origin again after a while, and does not write its file short while origins are read', async () => {
+    const drive = temporary(); const mac = computer(drive, 'Mac'); const pc = computer(drive, 'PC'); const web = repo(null);
+    mac.preferences = { ...mac.preferences, recentProjects: [web] }; mac.sync.sync(true); await mac.sync.remotesRead(); mac.sync.sync(true);
+    execFileSync('git', ['remote', 'add', 'origin', 'https://github.com/acme/web-app.git'], { cwd: web });
+    mac.sync.sync(true); await mac.sync.remotesRead(); mac.sync.sync(true); pc.sync.sync(true); expect(pc.sync.syncedProjects()).toEqual([]);
+    const now = Date.now(); const clock = vi.spyOn(Date, 'now').mockReturnValue(now + 11 * 60_000);
+    try { mac.sync.sync(true); await mac.sync.remotesRead(); mac.sync.sync(true); } finally { clock.mockRestore(); }
+    pc.sync.sync(true); expect(pc.sync.syncedProjects()).toMatchObject([{ repository: 'acme/web-app', machine: 'Mac' }]);
+    // Another project added: its origin is being read, so the file keeps the list it has rather than losing web-app.
+    mac.preferences = { ...mac.preferences, recentProjects: [repo('https://github.com/acme/api.git'), web] }; mac.sync.sync(true);
+    pc.sync.sync(true); expect(pc.sync.syncedProjects()).toMatchObject([{ repository: 'acme/web-app' }]);
+    await mac.sync.remotesRead(); mac.sync.sync(true); pc.sync.sync(true); expect(pc.sync.syncedProjects().map((item) => item.repository).sort()).toEqual(['acme/api', 'acme/web-app']);
+  });
 });

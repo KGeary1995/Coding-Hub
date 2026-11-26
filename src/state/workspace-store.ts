@@ -89,7 +89,7 @@ export function arrangeTiles(all: Session[], mode: LayoutMode): GridTile[] {
 }
 
 /** Whether tiles stand exactly as Trace arranges them in this layout: the person has not dragged or resized one since. */
-const standArranged = (tiles: GridTile[], mode: LayoutMode) => { const own = arrangeChannels(tiles.map((tile) => tile.sessionId), mode); return tiles.every((tile, index) => tile.x === own[index].x && tile.y === own[index].y && tile.w === own[index].w && tile.h === own[index].h); };
+export const standArranged = (tiles: GridTile[], mode: LayoutMode) => { const own = arrangeChannels(tiles.map((tile) => tile.sessionId), mode); return tiles.every((tile, index) => tile.x === own[index].x && tile.y === own[index].y && tile.w === own[index].w && tile.h === own[index].h); };
 
 /**
  * Tiles that match the channels the person sees: one each, none for a hidden Round Table seat or a removed session.

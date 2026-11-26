@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import { CircleAlert, Files, FolderOpen, GitCompareArrows, LoaderCircle, MonitorOff, RefreshCw } from 'lucide-react';
 import type { RepositoryContext } from '../../shared/types';
 import { channelsOf, useWorkspaceStore } from '../state/workspace-store';
+import { openProject } from '../state/projects';
 import { FileBrowser } from './FileBrowser';
 import { DiffViewer } from './DiffViewer';
 import { CommitHistory } from './CommitHistory';
@@ -11,7 +12,7 @@ import { folderName } from '../../shared/channel-name';
 import { startingChoice, useLastChannel } from '../state/last-channel';
 
 export function RepositoryPanel({ mode }: { mode: 'files' | 'diff' }) {
-  const { rootDirectory, sessions, setRootDirectory } = useWorkspaceStore();
+  const { rootDirectory, sessions } = useWorkspaceStore();
   // Review changes on a channel opens that channel's repository; otherwise the folder of the channel last used, when it is
   // not the workspace root (several projects, step 3), else the root.
   const [selection, setSelection] = useState(() => startingChoice(channelsOf(sessions), rootDirectory, useWorkspaceStore.getState().reviewSessionId, useLastChannel.getState().sessionId));
@@ -42,7 +43,7 @@ export function RepositoryPanel({ mode }: { mode: 'files' | 'diff' }) {
     return () => { cancelled = true; if (opened) void host.closeRepository({ repositoryId: opened.id }).catch(() => {}); };
   }, [directory, connectionRevision]);
   async function chooseProject() {
-    try { const selected = await window.codingHub?.pickDirectory(); if (selected) { setRootDirectory(selected); setSelection('workspace'); setConnectionRevision((value) => value + 1); } }
+    try { const selected = await window.codingHub?.pickDirectory(); if (selected) { openProject(selected); setSelection('workspace'); setConnectionRevision((value) => value + 1); } }
     catch { setError('The folder picker could not open.'); }
   }
   // One reading of the repository for staging and shipping, shared by the file list and the Ship column (1.31.3).
