@@ -7,10 +7,11 @@ import { FileBrowser } from './FileBrowser';
 import { DiffViewer } from './DiffViewer';
 import { CommitHistory } from './CommitHistory';
 import { channelDirectory } from '../state/channel-names';
+import { folderName } from '../../shared/channel-name';
 import { startingChoice, useLastChannel } from '../state/last-channel';
 
 export function RepositoryPanel({ mode }: { mode: 'files' | 'diff' }) {
-  const { rootDirectory, sessions, setView, setRootDirectory } = useWorkspaceStore();
+  const { rootDirectory, sessions, setRootDirectory } = useWorkspaceStore();
   // Review changes on a channel opens that channel's repository; otherwise the folder of the channel last used, when it is
   // not the workspace root (several projects, step 3), else the root.
   const [selection, setSelection] = useState(() => startingChoice(channelsOf(sessions), rootDirectory, useWorkspaceStore.getState().reviewSessionId, useLastChannel.getState().sessionId));
@@ -57,13 +58,12 @@ export function RepositoryPanel({ mode }: { mode: 'files' | 'diff' }) {
   return <section className={`repository-panel tr-repo ${mode === 'diff' ? 'tr-changes' : 'tr-files'}`}>
     <header className="ui-page-head">
       <span className="ui-page-icon" aria-hidden="true"><Icon /></span>
-      <div><h1>{mode === 'files' ? 'Files' : 'Changes'}</h1><p>{shown ? <code className="tr-subhead-path" title={shown}>{shown}</code> : 'No folder selected'}</p></div>
+      <div><h1>{mode === 'files' ? 'Files' : 'Changes'}</h1>{/* A sentence, as every page has under its title; the folder's whole path is its tooltip. */}<p>{shown ? <>{mode === 'files' ? 'The files in ' : 'What changed in '}<strong className="tr-subhead-folder" title={shown}>{folderName(shown)}</strong>{mode === 'files' ? '.' : ', to review and ship.'}</> : 'No folder selected'}</p></div>
       <div className="ui-page-actions">
         <label className="tr-subhead-select"><span className="tr-visually-hidden">Repository context</span><select aria-label="Repository context" value={selected.id} onChange={(event) => setSelection(event.target.value)}>{choices.map((choice) => <option key={choice.id} value={choice.id}>{choice.name}{choice.directory ? '' : ' · no folder'}</option>)}</select></label>
         {mode === 'diff' && repository && <span className="tr-seg" role="group" aria-label="Changes view"><button type="button" aria-pressed={!history} onClick={() => setHistory(false)}>Uncommitted</button><button type="button" aria-pressed={history} onClick={() => setHistory(true)}>History</button></span>}
         <button className="button secondary" onClick={chooseProject} disabled={!window.codingHub}><FolderOpen size={16} />{rootDirectory ? 'Change project' : 'Open project'}</button>
-        <button className="button secondary" onClick={() => { setRevision((value) => value + 1); if (!repository) setConnectionRevision((value) => value + 1); }} disabled={!directory || !window.codingHub}><RefreshCw size={16} />Refresh {mode === 'files' ? 'files' : 'changes'}</button>
-        <button className="quiet-button" onClick={() => setView('workspace')}>Back to channels</button>
+        <button className="button secondary" aria-label={`Refresh ${mode === 'files' ? 'files' : 'changes'}`} onClick={() => { setRevision((value) => value + 1); if (!repository) setConnectionRevision((value) => value + 1); }} disabled={!directory || !window.codingHub}><RefreshCw size={16} />Refresh</button>
       </div>
     </header>
     {mode === 'diff' ? <div className="tr-changes-grid"><div className="tr-changes-main">{body}</div>{repository && <GitDeliveryPanel key={repository.id + '-delivery'} directory={repository.directory} delivery={delivery} />}</div> : body}

@@ -18,7 +18,8 @@ const EMPTY: readonly number[] = Array(ACTIVITY_WINDOW).fill(0);
  * Gemini CLI reports no context window, so its footer has the tokens and no context.
  *
  * `place` 'head': the same numbers in the tile's header (the owner's choice of 2026-11-25, for the terminal's room), in short
- * (no labels, "tok" for "tok today", the rate in the trace's tooltip). Which of the two shows follows the tile's width (tile.css).
+ * (no labels, "tok" for "tok today", "ctx" after an amount in context, which has no meter to name it and read as a bare
+ * number, the rate in the trace's tooltip). Which of the two shows follows the tile's width (tile.css).
  */
 export function ScopeStrip({ sessionId, state, engine, limit, limitLabel, limitName = 'Context', chat = false, tokens, tokensTitle = 'New tokens in this channel today', contextUsed, place = 'foot' }: { sessionId: string; state: ChannelState; engine: ChannelEngine; limit: number | null; limitLabel: string; limitName?: 'Context' | 'Budget'; chat?: boolean; tokens?: number | null; tokensTitle?: string; place?: 'head' | 'foot'; contextUsed?: number | null }) {
   const samples = useActivityStore((store) => store.samples[sessionId]) ?? EMPTY;
@@ -32,7 +33,7 @@ export function ScopeStrip({ sessionId, state, engine, limit, limitLabel, limitN
       {limit !== null ? <span className="tr-foot-item" title={limitLabel}><Gauge size={12} aria-hidden="true" /><span className="tr-foot-label" aria-hidden="true">{limitName}</span>
         <span className={`tr-scope-limit ui-meter ${hot ? 'limit' : engine}`} role="img" aria-label={limitLabel}><i style={{ width: `${Math.min(100, Math.round(limit * 100))}%` }} /></span>
         <b className={`tr-foot-value ${hot ? 'hot' : ''}`}>{Math.round(limit * 100)}%</b></span>
-        : contextUsed ? <span className="tr-foot-item" title="Tokens in context. Claude Code does not report its context window, so there is no percentage."><Gauge size={12} aria-hidden="true" /><span className="tr-foot-label">Context</span><b className="tr-foot-value">{compact(contextUsed)}</b></span> : null}
+        : contextUsed ? <span className="tr-foot-item" title="Tokens in context. Claude Code does not report its context window, so there is no percentage."><Gauge size={12} aria-hidden="true" /><span className="tr-foot-label">Context</span><b className="tr-foot-value">{compact(contextUsed)}</b>{head && ' ctx'}</span> : null}
       <span className="tr-foot-item" title={tokensTitle}><Coins size={12} aria-hidden="true" /><b className="tr-foot-value">{tokens === null ? '—' : compact(tokens ?? 0)}</b> {head ? 'tok' : 'tok today'}</span>
     </>}
     {!chat && <><svg className="tr-scope-plot" viewBox={`0 0 ${TRACE_WIDTH} ${TRACE_HEIGHT}`} preserveAspectRatio="none" role="img" aria-label={`Terminal output over the last two minutes${rate ? `, ${compact(rate)} characters in the last second` : ', quiet'}`}>

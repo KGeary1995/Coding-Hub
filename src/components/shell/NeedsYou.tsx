@@ -30,7 +30,7 @@ export function NeedsYouCell() {
   return <div className="needs-you" ref={box}>
     {/* The separator is not drawn (the count is a pill), but it stays in the button's name: "Needs you · 2". */}
     <button className="tr-sb-cell needs-you-cell" aria-expanded={open} aria-haspopup="dialog" onClick={() => setOpen(!open)} title={items.map((item) => item.title).join('\n')}>Needs you<span className="needs-you-sep"> · </span><span className="ui-count waiting">{items.length}</span></button>
-    {open && <div className="needs-you-list" role="dialog" aria-label="Needs you"><ol>{items.map((item) => <li key={item.key} className={`needs-you-${item.kind}`}>
+    {open && <div className="needs-you-list" role="dialog" aria-label="Needs you">{/* Named, so the list does not read as a notice that came up by itself. */}<p className="needs-you-head" aria-hidden="true">Needs you · {items.length}</p><ol>{items.map((item) => <li key={item.key} className={`needs-you-${item.kind}`}>
       <div><strong>{item.title}</strong>{item.since && <small className="tnum"> · waiting {waited(item.since)}</small>}<p>{item.detail}</p></div>
       <button className="button small" onClick={() => go(item)}>{ACTION[item.action]}</button>
     </li>)}</ol></div>}

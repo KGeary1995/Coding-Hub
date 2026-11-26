@@ -34,7 +34,7 @@ export function TracePlugins() {
     <form className="plugin-install" onSubmit={(e) => { e.preventDefault(); if (repo.trim()) void fetchPreview(repo, ref); }}>
       <label>Install from GitHub<input aria-label="GitHub repository" placeholder="owner/repo or owner/repo/folder" value={repo} onChange={(e) => setRepo(e.target.value)} /></label>
       <label>Branch, tag or commit<input aria-label="Branch, tag or commit" placeholder="The default branch" value={ref} onChange={(e) => setRef(e.target.value)} /></label>
-      <button type="submit" className="button secondary small" disabled={busy || !repo.trim()}><Download size={13} aria-hidden="true" />Preview</button>
+      <button type="submit" className="button secondary" disabled={busy || !repo.trim()}><Download size={16} aria-hidden="true" />Preview</button>
       <small className="ui-hint">Fetched with this computer's Git, so a private repository works when Git is signed in to GitHub here. Nothing runs before you install.</small>
     </form>
     {preview && <section className="plugin-preview" aria-label={`Preview of ${preview.name}`}>

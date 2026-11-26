@@ -94,7 +94,7 @@ const { NO_DRIVE } = require('./lib/no-drive.cjs');
     }
     assert.equal((await page.evaluate(() => window.codingHub.listHistory())).value.length, 0);
     assert.equal((await page.evaluate(() => window.codingHub.loadWorkspace())).value.workspace, null);
-    await page.getByRole('button', { name: 'Back to channels', exact: true }).click();
+    await openView(page, 'Workspace');
     // Mock only the OS dialog selection. Everything after it uses actual native IPC and PTYs.
     await app.evaluate(({ dialog }, project) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [project] }); }, projects[0]);
     await page.getByRole('button', { name: 'Open project', exact: true }).click();
@@ -301,7 +301,7 @@ const { NO_DRIVE } = require('./lib/no-drive.cjs');
     await page.getByRole('treeitem', { name: 'File README.md', exact: true }).click();
     await page.waitForFunction(() => document.querySelector('[aria-label="File contents"]')?.textContent.includes('Second repository independent.'));
     assert.deepEqual(await readFile(path.join(projects[0], '.git/index')), indexBeforeReview);
-    await page.getByRole('button', { name: 'Back to channels', exact: true }).click();
+    await openView(page, 'Workspace');
     assert.equal(await first.locator('.xterm').evaluate((element) => element === window.firstTerminalElement), true);
     await (await tileControl(page, 'Isolate channel 1')).click();
     assert.equal(await page.locator('.session-tile').count(), 1);
@@ -479,7 +479,7 @@ const { NO_DRIVE } = require('./lib/no-drive.cjs');
     assert.equal(output.value.text.includes('\x1b'), false);
     const invalidLog = await page.evaluate(() => window.codingHub.readRunLog({ runId: '../../other' }));
     assert.equal(invalidLog.ok, false);
-    await page.getByRole('button', { name: 'Back to channels', exact: true }).click();
+    await openView(page, 'Workspace');
     // + Channel (1.43.0): Terminal, one row each for Claude Code, Codex and Gemini with CLI and Chat, then Round Table with
     // Discussion and Hierarchy (two channels are open, so a table fits). Each choice keeps its full name.
     await page.getByRole('button', { name: 'New channel', exact: true }).click();

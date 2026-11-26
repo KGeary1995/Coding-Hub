@@ -75,8 +75,9 @@
 .state-waiting .tr-state-chip, .state-failed .tr-state-chip { animation: tr-blink3 .4s steps(1) 3; }
 .state-starting .tr-state-chip { animation: tr-start-pulse 1.2s ease-in-out infinite; }
 /* As wide as its widest word ("Needs you", 7.9em at its 11px), so the header's buttons to its left stay put while the
-   word changes: a click on Controls while a busy chat's word changed landed on the header and did nothing (1.44.0). */
-.tr-tile-head .tr-state-chip { min-width: 8em; }
+   word changes: a click on Controls while a busy chat's word changed landed on the header and did nothing (1.44.0). The
+   word stands in its middle: at the start, a short one ("Idle") left the pill's end empty and it read as stretched. */
+.tr-tile-head .tr-state-chip { min-width: 8em; justify-content: center; }
 
 /* The action for the state, before the badge: a small button (24 px). Plain is the secondary form (Review changes,
    Open log); Start and Write handoff are tinted with their colour; Answer is the solid waiting colour, as an approval's

@@ -265,6 +265,7 @@ button.tr-sb-channel { padding: 0 calc(8px - var(--sb-tight) * 4); }
 /* ---------- Needs you ---------- */
 /* An overlay card over the status bar: everything waiting for the person, each with its next step. */
 .needs-you-list { position: absolute; right: 0; bottom: calc(100% + 8px); z-index: 80; width: min(440px, 90vw); max-height: 60vh; overflow: auto; padding: 4px; border: 1px solid var(--tr-line-strong); border-radius: var(--tr-r-overlay); background: var(--tr-card); box-shadow: var(--tr-shadow-overlay); color: var(--tr-fg); font: 400 13px/20px var(--tr-font-ui); white-space: normal; }
+.needs-you-list .needs-you-head { margin: 0; padding: 4px 8px 8px; font: var(--tr-t-small); font-weight: 600; color: var(--tr-fg-dim); }
 .needs-you-list ol { display: grid; gap: 4px; margin: 0; padding: 0; list-style: none; }
 /* A row is a well; its left edge takes the colour of what it waits for. */
 .needs-you-list li { --tone: var(--tr-line-control); display: flex; align-items: center; gap: 12px; padding: 8px 12px; border-radius: var(--tr-r-control); background: var(--tr-well); box-shadow: inset 3px 0 0 var(--tone); }

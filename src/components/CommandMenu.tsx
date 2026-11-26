@@ -14,6 +14,7 @@ import { VIEW_KEYS } from '../runtime/view-shortcuts';
 import { jumpToChannel } from './shell/StatusBar';
 import { useLinkedStore } from '../state/linked-store';
 import { channelKeyHint } from './channel-key';
+import { MOD_KEY } from './platform';
 import type { SearchHit, SearchResults } from '../../shared/productivity';
 import type { VerificationData } from '../../shared/workbench';
 import type { PluginData } from '../../shared/plugins';
@@ -157,7 +158,7 @@ export function CommandMenu() {
     else if (event.key === 'Enter') { event.preventDefault(); run(items[selected]); }
   };
   const groups = GROUP_ORDER.map((group) => ({ group, entries: items.map((item, index) => ({ item, index })).filter(({ item }) => item.group === group) })).filter(({ entries }) => entries.length);
-  return <><button className="command-trigger" aria-label="Search or run a command" title="Search or run a command (Ctrl ⇧ P)" onClick={() => setOpen(true)}><Search className="command-trigger-icon" size={16} aria-hidden="true" /><span>Search or run a command</span><kbd aria-hidden="true">Ctrl ⇧ P</kbd></button>
+  return <><button className="command-trigger" aria-label="Search or run a command" title={`Search or run a command (${MOD_KEY} ⇧ P)`} onClick={() => setOpen(true)}><Search className="command-trigger-icon" size={16} aria-hidden="true" /><span>Search or run a command</span><kbd aria-hidden="true">{MOD_KEY} ⇧ P</kbd></button>
     {open && <div className="command-backdrop tr-scrim" onClick={() => setOpen(false)}>
       <section ref={dialog} className="command-menu tr-command" role="dialog" aria-modal="true" aria-label="Workspace commands" onClick={(event) => event.stopPropagation()}>
         <div className="tr-command-input"><Search size={16} aria-hidden="true" />

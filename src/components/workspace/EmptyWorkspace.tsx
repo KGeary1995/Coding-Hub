@@ -4,6 +4,7 @@ import type { AccountConnection } from '../../../shared/accounts';
 import type { SessionHistoryRun } from '../../../shared/types';
 import { useWorkspaceStore } from '../../state/workspace-store';
 import { openProjectFolder } from '../shell/Topbar';
+import { MOD_KEY } from '../platform';
 import { TraceMark } from '../shell/TraceMark';
 import { ENGINE_ICONS } from '../tile/engine-icons';
 
@@ -80,7 +81,7 @@ export function EmptyWorkspace({ onSkip }: { onSkip: () => void }) {
         <button className="button large" onClick={() => setView('projects')}><Github size={16} aria-hidden="true" />Clone from GitHub{github && !githubReady && <span className="ui-badge warning">Sign-in needed</span>}</button>
         <button className="button large" onClick={() => setView('projects')}><FolderPlus size={16} aria-hidden="true" />New project</button>
       </div>
-      <p className="tr-start-keys"><span><kbd>Ctrl O</kbd> Open folder</span><span><kbd>Ctrl ⇧ N</kbd> New project</span></p>
+      <p className="tr-start-keys"><span><kbd>{MOD_KEY} O</kbd> Open folder</span><span><kbd>{MOD_KEY} ⇧ N</kbd> New project</span></p>
       {error && <div role="alert" className="ui-banner danger"><CircleAlert aria-hidden="true" /><span>{error}</span></div>}
     </div>
     <div className="ui-grid">

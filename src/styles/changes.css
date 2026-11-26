@@ -7,7 +7,7 @@
 .app-shell .main-shell:has(> .tr-repo) { padding: 0; overflow: hidden; }
 .repository-panel.tr-repo { height: 100%; max-width: none; width: 100%; display: flex; flex-direction: column; padding: 24px; }
 .tr-repo > .ui-page-head { flex: none; }
-.tr-subhead-path { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: var(--tr-t-meta); line-height: 20px; }
+.tr-subhead-folder { font-weight: 600; color: var(--tr-fg); }
 .tr-subhead-select select { max-width: 240px; }
 /* Changes has the most actions (Uncommitted / History too): they wrap under each other rather than run off a narrow window. */
 .tr-changes > .ui-page-head > .ui-page-actions { flex: 0 1 auto; min-width: 0; flex-wrap: wrap; justify-content: flex-end; }

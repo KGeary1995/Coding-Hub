@@ -41,8 +41,9 @@
 .task-everything dl { display: grid; grid-template-columns: max-content 1fr; gap: 4px 12px; margin: 8px 0 0; font: var(--tr-t-small); }
 .task-everything dt { color: var(--tr-fg-dim); }
 .task-everything dd { margin: 0; overflow-wrap: anywhere; }
-/* Scheduled jobs (1.39.0): a card above the board, its jobs as rows with their actions, and a small form. */
-.scheduled-jobs { max-width: 1000px; display: flex; flex-direction: column; gap: 12px; margin-bottom: 16px; }
+/* Scheduled jobs (1.39.0): a card above the board, as wide as it (a data page fills the width), its jobs as rows with
+   their actions, and a small form. */
+.scheduled-jobs { display: flex; flex-direction: column; gap: 12px; margin-bottom: 16px; }
 .scheduled-jobs .ui-card-head { margin-bottom: 0; }
 .scheduled-jobs .ui-card-head .button { margin-left: auto; }
 .scheduled-jobs > .ui-hint { margin: 0; }
