@@ -63,19 +63,38 @@ describe('the first request', () => {
   it('goes to a terminal agent once its output has been quiet, and to the tile if never ready', async () => {
     vi.useFakeTimers();
     try {
-      const { sendWhenReady, READY_QUIET_MS, READY_LIMIT_MS } = await import('./start-order');
+      const { sendWhenReady, READY_QUIET_MS, READY_AFTER_QUESTION_MS, READY_LIMIT_MS } = await import('./start-order');
       const agent = { ...createSession('claude'), status: 'running' as const, runId: 'r1' }; workspace(agent);
       const sent = sendWhenReady(agent.id, 'Check the build.');
       fake.watchers.get(agent.id)!('Do you trust the files in this folder?');
       useWorkspaceStore.setState((state) => ({ sessions: state.sessions.map((item) => ({ ...item, attention: { message: 'Trust?', at: '' } })) }));
       await vi.advanceTimersByTimeAsync(READY_QUIET_MS * 2); expect(fake.typed).toEqual([]);
       useWorkspaceStore.setState((state) => ({ sessions: state.sessions.map((item) => ({ ...item, attention: null })) }));
-      await vi.advanceTimersByTimeAsync(READY_QUIET_MS + 500); await sent;
+      // After a question, the quiet it waits for is longer (a second question can follow, as Codex's hook review does).
+      await vi.advanceTimersByTimeAsync(READY_QUIET_MS + 500); expect(fake.typed).toEqual([]);
+      await vi.advanceTimersByTimeAsync(READY_AFTER_QUESTION_MS); await sent;
       expect(fake.typed).toEqual([[agent.id, 'Check the build.\r']]);
       fake.typed = [];
       const busy = { ...createSession('codex'), status: 'running' as const, runId: 'r2', attention: { message: 'Approve?', at: '' } }; workspace(busy);
       const offered = sendWhenReady(busy.id, 'Hello'); await vi.advanceTimersByTimeAsync(READY_LIMIT_MS + 1000); await offered;
       expect(fake.typed).toEqual([]); expect(useWorkspaceStore.getState().sessions[0].preparedRequest).toEqual({ prompt: 'Hello', label: 'Send first request' });
+    } finally { vi.useRealTimers(); }
+  });
+  it('is offered again on the tile when a startup question shows soon after it was typed (it was not taken)', async () => {
+    vi.useFakeTimers();
+    try {
+      const { sendWhenReady, READY_QUIET_MS } = await import('./start-order'); const { CODEX_HOOK_QUESTION } = await import('../../shared/start-order');
+      const codex = { ...createSession('codex'), status: 'running' as const, runId: 'r3' }; workspace(codex);
+      const sent = sendWhenReady(codex.id, 'Fix the tests.'); await vi.advanceTimersByTimeAsync(READY_QUIET_MS + 500);
+      expect(await sent).toBe(true); expect(fake.typed).toEqual([[codex.id, 'Fix the tests.\r']]); expect(useWorkspaceStore.getState().sessions[0].preparedRequest).toBeUndefined();
+      useWorkspaceStore.setState((state) => ({ sessions: state.sessions.map((item) => ({ ...item, attention: { message: CODEX_HOOK_QUESTION, at: '' } })) }));
+      await vi.advanceTimersByTimeAsync(500);
+      expect(useWorkspaceStore.getState().sessions[0].preparedRequest).toEqual({ prompt: 'Fix the tests.', label: 'Send first request' });
+      // An approval the agent asks for while working on it is not a lost request: nothing is offered.
+      const claude = { ...createSession('claude'), status: 'running' as const, runId: 'r4' }; workspace(claude);
+      const taken = sendWhenReady(claude.id, 'Build it.'); await vi.advanceTimersByTimeAsync(READY_QUIET_MS + 500); await taken;
+      useWorkspaceStore.setState((state) => ({ sessions: state.sessions.map((item) => ({ ...item, attention: { message: 'Claude wants to run npm test', at: '' } })) }));
+      await vi.advanceTimersByTimeAsync(16_000); expect(useWorkspaceStore.getState().sessions[0].preparedRequest).toBeUndefined();
     } finally { vi.useRealTimers(); }
   });
   it('goes to a custom agent at its start when its definition takes it as arguments, and is not typed again', async () => {
