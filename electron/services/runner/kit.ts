@@ -88,9 +88,11 @@ export function ensureKit(place: RunnerPlace, appPath: string, execPath: string,
  */
 export function removeOldKits(place: RunnerPlace, keep: string[]) {
   let names: string[]; try { names = fs.readdirSync(place.kits); } catch { return; }
-  const kept = new Set(keep.map((folder) => path.resolve(folder).toLowerCase()));
+  // Real paths: the runner names its kit as its own path resolves (a Mac's /var is /private/var), so a kit in use is never taken for an old one.
+  const real = (folder: string) => { try { return fs.realpathSync(folder).toLowerCase(); } catch { return path.resolve(folder).toLowerCase(); } };
+  const kept = new Set(keep.map(real));
   for (const name of names) {
-    const folder = path.join(place.kits, name); if (kept.has(path.resolve(folder).toLowerCase())) continue;
+    const folder = path.join(place.kits, name); if (kept.has(real(folder))) continue;
     const trash = name.endsWith('.trash') ? folder : `${folder}.${process.pid}.trash`;
     try { if (trash !== folder) fs.renameSync(folder, trash); fs.rmSync(trash, { recursive: true, force: true }); } catch { /* In use: removed another time. */ }
   }

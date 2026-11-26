@@ -3,6 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { ensureKit, kitFiles, removeOldKits, runnerPlace, runnerSecret, RUNNER_EXECUTABLE } from './kit';
+import { canSymlink } from '../hub/symlink.fixture';
 
 const roots: string[] = [];
 afterEach(() => { for (const root of roots.splice(0)) fs.rmSync(root, { recursive: true, force: true }); });
@@ -61,4 +62,14 @@ describe('runner kit', () => {
     expect(runnerPlace('/home/a/.coding-hub', 'linux').address).toBe(path.join('/home/a/.coding-hub', 'runner', 'v1.sock'));
     const place = runnerPlace(temp()); const secret = runnerSecret(place); expect(secret.length).toBeGreaterThanOrEqual(32); expect(runnerSecret(place)).toBe(secret);
   });
+  it.skipIf(!canSymlink)('keeps the kit its runner runs from when the storage folder is reached through a link (a Mac\'s /var)', () => {
+    const real = fs.mkdtempSync(path.join(os.tmpdir(), 'trace-kit-real-')); const link = `${real}-link`; fs.symlinkSync(real, link, 'dir');
+    try {
+      const place = runnerPlace(link); fs.mkdirSync(path.join(place.kits, 'kit-used'), { recursive: true }); fs.mkdirSync(path.join(place.kits, 'kit-old'));
+      // The runner says where it runs from as its own path resolves: through the real folder.
+      removeOldKits(place, [path.join(fs.realpathSync(place.kits), 'kit-used')]);
+      expect(fs.readdirSync(place.kits)).toEqual(['kit-used']);
+    } finally { fs.rmSync(link, { force: true }); fs.rmSync(real, { recursive: true, force: true }); }
+  });
 });
+
