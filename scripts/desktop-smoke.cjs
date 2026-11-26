@@ -503,6 +503,8 @@ const { NO_DRIVE } = require('./lib/no-drive.cjs');
     await restored.waitForFunction(() => document.querySelectorAll('.session-tile').length === 1);
     await restored.getByRole('button', { name: /^Project /, exact: false }).first().click(); await restored.getByRole('menuitem', { name: /^All projects/ }).click();
     await restored.waitForFunction(() => document.querySelectorAll('.session-tile').length === 2);
+    // The project button says so, not the open project's name (it did up to 1.48.0).
+    assert.equal(await restored.getByRole('button', { name: /^Project / }).first().getAttribute('aria-label'), 'Project All projects');
     assert.equal(await restored.getByRole('button', { name: 'Start channel', exact: true }).count(), 2);
     const saved = await restored.evaluate(() => window.codingHub.loadWorkspace());
     assert.equal(saved.ok, true);
@@ -593,7 +595,9 @@ const { NO_DRIVE } = require('./lib/no-drive.cjs');
     await restored.getByRole('button', { name: 'Projects', exact: true }).click();
     await restored.getByLabel('Existing folder path', { exact: true }).fill(projects[0]);
     await restored.getByRole('button', { name: 'Open this path', exact: true }).click();
-    assert.equal(await restored.locator('.session-tile').count(), 3);
+    // Opening a project, the open one too, ends All projects: the channel in the second repository is hidden again.
+    await restored.waitForFunction(() => document.querySelectorAll('.session-tile').length === 2);
+    assert.equal(await restored.getByRole('button', { name: /^Project / }).first().getAttribute('aria-label'), `Project ${path.basename(projects[0])}`);
     await restored.getByRole('button', { name: 'Projects', exact: true }).click();
     await restored.getByLabel('Project parent folder', { exact: true }).fill(root);
     await restored.getByLabel('New project name', { exact: true }).fill('new-desktop-project');
