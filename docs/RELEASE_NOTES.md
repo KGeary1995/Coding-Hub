@@ -2,7 +2,7 @@
 
 1.47.0 (not released yet).
 
-- **The automatic handoff now covers Round Table seats.** Near the end of its context, a Claude Code, Codex or Gemini seat at a discussion table is asked for its handoff on its own once the table rests, and a Claude Code or Codex seat is compacted once it is saved. Nothing of that turn goes to the other seats, and a message you send meanwhile waits for it. A Gemini seat now reports how full its context is; Trace cannot compact it, so its tile says the handoff is saved. A hidden seat shows on its lead's tile and in Needs you. Not tried yet with real agents at a table.
+- **The automatic handoff now covers Round Table seats.** Near the end of its context, a Claude Code, Codex or Gemini seat at a discussion table is asked for its handoff on its own once the table rests, and compacted once it is saved. Nothing of that turn goes to the other seats, and a message you send meanwhile waits for it. A Gemini seat now reports how full its context is, and is compacted with agy's own compact command. A hidden seat shows on its lead's tile and in Needs you. Not tried yet with real agents at a table.
 
 1.46.0 organises channels by project, syncs your projects between computers, and makes controlling administrator apps over screen sharing safe.
 

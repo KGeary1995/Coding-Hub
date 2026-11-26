@@ -33,8 +33,6 @@ export function handoffHandled(session: Session, sessions: Session[]): boolean {
   const lead = tableLeadOf(sessions, session); if (!lead) return isChatEngineConfig(session.config);
   return lead.roundTable?.kind !== 'hierarchy' && (isChatEngineConfig(session.config) || (session.config.engine === 'gemini' && session.config.chat === true));
 }
-/** Whether Trace compacts the conversation once the handoff is saved: Gemini over ACP cannot (agy 1.5.16 took /compact as a message to its model, seen 2026-11-25). */
-export const handoffCompacts = (session: Session) => isChatEngineConfig(session.config);
 
 /**
  * Whether Trace saves this channel's handoff itself: automatic memory on, an agent it handles (handoffHandled; a token
@@ -58,10 +56,3 @@ export const HANDOFF_DETAIL: Record<HandoffShown, string> = {
   asked: 'Near the end of its context: Trace asked it to save a handoff, and compacts it once saved.',
   saved: 'Its handoff is saved in shared memory: Trace compacts it when its turn ends.',
 };
-/** The same for an agent Trace cannot compact (handoffCompacts): the handoff is saved, and a new conversation is the person's to start. */
-const UNCOMPACTED: Partial<Record<HandoffShown, string>> = {
-  'at-turn-end': 'Near the end of its context: Trace asks it to save a handoff when its turn ends. Trace cannot compact it, so start a new conversation before it runs out.',
-  asked: 'Near the end of its context: Trace asked it to save a handoff. Trace cannot compact it, so start a new conversation before it runs out.',
-  saved: 'Its handoff is saved in shared memory. Trace cannot compact it, so start a new conversation before it runs out.',
-};
-export const handoffDetail = (shown: HandoffShown, session: Session) => (!handoffCompacts(session) && UNCOMPACTED[shown]) || HANDOFF_DETAIL[shown];

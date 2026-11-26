@@ -71,7 +71,7 @@ describe('a Round Table seat’s automatic handoff (1.47)', () => {
     const chain = { ...lead, roundTable: { ...table, kind: 'hierarchy' as const } }; expect(handoffDue(codex, [chain, codex, gemini], full, {}, { ...idle, kind: 'hierarchy' })).toBe(false);
   });
 
-  it('asks the seat at its limit through the table, then compacts it once its handoff is saved; Gemini is not compacted', async () => {
+  it('asks the seat at its limit through the table, then compacts it once its handoff is saved, a Gemini seat too', async () => {
     const chats: Record<string, unknown>[] = []; let notes: Pick<MemoryNote, 'author' | 'createdAt'>[] = [];
     const chat = vi.fn(async (request: Record<string, unknown>) => { chats.push(request); return { ok: true, value: null }; });
     vi.stubGlobal('window', { codingHub: { chat, hub: async (request: { action: string }) => ({ ok: true, value: request.action === 'memory-key' ? 'project-key' : notes }) } });
@@ -89,12 +89,22 @@ describe('a Round Table seat’s automatic handoff (1.47)', () => {
     await askForHandoff('s2', 0);
     expect(chats.at(-1)).toEqual({ action: 'table-compact', sessionId: 's1', runId: RUNS.s1, seat: { sessionId: 's2', runId: RUNS.s2 } });
     expect(useHandoffStore.getState().bySession.s2.phase).toBe('compacted');
-    // The Gemini seat climbs: asked, and once saved it stays saved (agy cannot be compacted from Trace).
+    // The Gemini seat climbs: asked, and compacted once saved.
     useHubStore.setState({ usage: [record('s1', 100_000), record('s2', 30_000), record('s3', 950_000, 1_048_576)] } as never);
     expect(await askForHandoff('s2', 0)).toBe(true); expect(chats.at(-1)).toMatchObject({ action: 'table-handoff', seat: { sessionId: 's3' }, percent: 91 });
     notes = [{ author: 'gemini', createdAt: new Date().toISOString() }]; const count = chats.length;
     await askForHandoff('s3', 0);
-    expect(useHandoffStore.getState().bySession.s3.phase).toBe('saved'); expect(chats).toHaveLength(count);
+    expect(chats.slice(count)).toEqual([{ action: 'table-compact', sessionId: 's1', runId: RUNS.s1, seat: { sessionId: 's3', runId: RUNS.s3 } }]); expect(useHandoffStore.getState().bySession.s3.phase).toBe('compacted');
+  });
+  it('leaves a seat saved when the host cannot compact it (agy has not listed its command yet), and does not try again', async () => {
+    const chats: Record<string, unknown>[] = [];
+    vi.stubGlobal('window', { codingHub: { chat: async (request: Record<string, unknown>) => { chats.push(request); return request.action === 'table-compact' ? { ok: false, error: { code: 'COMPACT_UNAVAILABLE', message: 'Gemini cannot compact its conversation from Trace.' } } : { ok: true, value: null }; }, hub: async (request: { action: string }) => ({ ok: true, value: request.action === 'memory-key' ? 'k' : [{ author: 'gemini', createdAt: new Date().toISOString() }] }) } });
+    const fresh = { ...gemini, runId: '44444444-4444-4444-8444-444444444444' };
+    useWorkspaceStore.setState({ sessions: [lead, codex, fresh], rootDirectory: '/p' } as never); useChatStore.setState({ threads: { s1: { table: idle } } } as never);
+    useHubStore.setState({ usage: [record('s1', 10_000), record('s2', 10_000), { ...record('s3', 960_000), runId: fresh.runId }], preferences: {} } as never);
+    expect(await askForHandoff('s1', 0)).toBe(true); await askForHandoff('s3', 0);
+    expect(useHandoffStore.getState().bySession.s3.phase).toBe('saved'); const count = chats.length;
+    await askForHandoff('s1', 0); expect(chats).toHaveLength(count);
   });
 
   it('asks nobody while the table works or a seat waits for an approval, and asks again later if the table refused', async () => {

@@ -93,6 +93,18 @@ describe('Gemini seat over ACP (agy acp)', () => {
     const before = events.length; usage({ used: 500, size: 0 }); usage({ used: 500 }); usage({ used: '500', size: 1000 }); usage({ used: -1, size: 1000 });
     expect(events.slice(before).some((event) => event.type === 'context-window')).toBe(false);
   });
+  it('compacts with a prompt of /compact only once agy has listed its compact command (1.47)', () => {
+    const { stream, written, events, answer, feed, open } = setup(); open();
+    const prompts = () => written.filter((item) => item.method === 'session/prompt');
+    // Before agy lists it, a /compact prompt reached its model as words: not sent.
+    expect(stream.compact()).toBe(false); expect(prompts()).toHaveLength(0);
+    feed({ jsonrpc: '2.0', method: 'session/update', params: { sessionId: 's', update: { sessionUpdate: 'available_commands_update', availableCommands: [{ name: 'goal' }, { name: 'compact', description: 'Compact the conversation now' }] } } });
+    expect(stream.compact()).toBe(true); expect(prompts().at(-1)).toMatchObject({ params: { prompt: [{ type: 'text', text: '/compact' }] } });
+    answer('session/prompt', { jsonrpc: '2.0', result: { stopReason: 'end_turn' } }); expect(events.at(-1)).toEqual({ type: 'done', isError: false, error: null });
+    // A list without it again: not sent.
+    feed({ jsonrpc: '2.0', method: 'session/update', params: { sessionId: 's', update: { sessionUpdate: 'available_commands_update', availableCommands: [{ name: 'goal' }] } } });
+    expect(stream.compact()).toBe(false); expect(prompts()).toHaveLength(1);
+  });
   it('names a file change "File changes", so a Round Table declines it, and answers with agy’s reject option', () => {
     const { stream, written, events, feed, open } = setup(); open(); stream.send('x', []);
     // agy never asked before a write in the recorded sessions; this is its command request with a write's kind.

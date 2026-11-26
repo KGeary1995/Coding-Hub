@@ -7,7 +7,7 @@ import { hiddenSeats, leadOf, useWorkspaceStore } from '../state/workspace-store
 import { hubCall, useHubStore } from '../state/hub-store';
 import { chatFailed, chatSent, useChatStore } from '../state/chat-store';
 import { submitTerminal } from './terminals';
-import { contextShare, handoffCompacts, handoffHandled, setHandoffPhase, tableLeadOf } from '../state/handoff-store';
+import { contextShare, handoffHandled, setHandoffPhase, tableLeadOf } from '../state/handoff-store';
 import { channelDirectory } from '../state/channel-names';
 
 /**
@@ -104,7 +104,7 @@ async function tableHandoff(ended: Session, lead: Session): Promise<boolean> {
   const runId = ended.runId!; const pending = waiting.get(runId);
   if (pending) {
     if (++pending.turns > 3) { waiting.delete(runId); setHandoffPhase(ended.id, runId, 'not-saved'); }
-    else if (await written(ended, pending.at)) { waiting.delete(runId); setHandoffPhase(ended.id, runId, 'saved'); if (handoffCompacts(ended)) compacting.add(runId); }
+    else if (await written(ended, pending.at)) { waiting.delete(runId); setHandoffPhase(ended.id, runId, 'saved'); compacting.add(runId); }
   }
   if (!window.codingHub || !lead.runId) return false;
   const table = useChatStore.getState().threads[lead.id]?.table; if (!resting(table)) return false;
@@ -113,7 +113,8 @@ async function tableHandoff(ended: Session, lead: Session): Promise<boolean> {
   const reference = (seat: Session) => ({ action: 'table-compact' as const, sessionId: lead.id, runId: lead.runId!, seat: { sessionId: seat.id, runId: seat.runId! } });
   for (const seat of seats) if (compacting.has(seat.runId!) && seat.status === 'running' && !seat.attention) {
     const result = await window.codingHub.chat(reference(seat)).catch(() => null);
-    // Busy again (the person's message went first): compacted when the table next rests. Any other refusal is final.
+    // Busy again (the person's message went first): compacted when the table next rests. Any other refusal is final (a
+    // Gemini seat whose agy has not listed its compact command stays saved).
     if (result?.ok || result?.error.code !== 'TABLE_BUSY') compacting.delete(seat.runId!);
     if (result?.ok) setHandoffPhase(seat.id, seat.runId!, 'compacted');
     return false;

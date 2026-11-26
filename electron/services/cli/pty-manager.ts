@@ -520,7 +520,7 @@ export class PtyManager {
     else if (request.action === 'compact') {
       if (!run.chat.compact) throw new HubError('COMPACT_UNAVAILABLE', 'This agent cannot compact its conversation from Trace.');
       if (run.turnOpen) throw new HubError('CHAT_BUSY', 'The agent is still answering. Compact once its turn has ended.');
-      run.turnOpen = true; run.chat.compact();
+      run.turnOpen = true; if (run.chat.compact() === false) { run.turnOpen = false; throw new HubError('COMPACT_UNAVAILABLE', 'This agent cannot compact its conversation yet.'); }
       try { this.dependencies.onChat?.(owner, { sessionId: request.sessionId, runId: request.runId, event: { type: 'user', text: '/compact', images: 0 } }); } catch { /* The thread shows it from the window's own send. */ }
     }
     else if (request.action === 'answer') { if (!run.chat.answer(request.requestId, request.allow, request.allowEdits)) throw new HubError('ANSWERED', 'That request was already answered.'); }
@@ -594,7 +594,7 @@ export class PtyManager {
     setReadOnly: (runId, readOnly) => this.chatRun(runId)?.chat?.setReadOnly(readOnly),
     answer: (runId, requestId, allow) => { this.chatRun(runId)?.chat?.answer(requestId, allow); },
     interrupt: (runId) => this.chatRun(runId)?.chat?.interrupt(),
-    compact: (runId) => { const run = this.chatRun(runId); if (!run?.chat?.compact || run.turnOpen) return false; run.turnOpen = true; run.chat.compact(); return true; },
+    compact: (runId) => { const run = this.chatRun(runId); if (!run?.chat?.compact || run.turnOpen) return false; run.turnOpen = true; if (run.chat.compact() !== false) return true; run.turnOpen = false; return false; },
     emit: (owner, envelope) => { try { this.dependencies.onChat?.(owner, envelope); } catch { this.dependencies.onEventError?.(); } },
     stateOf: (cwd) => repositoryState(cwd),
   }; }

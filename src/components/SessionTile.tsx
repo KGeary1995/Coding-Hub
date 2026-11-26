@@ -27,7 +27,7 @@ import { PastedImages } from './PastedImages';
 import { closeChannel, startSession, stopSession } from '../runtime/use-native-host';
 import { focusTerminal, submitTerminal, writeTerminal } from '../runtime/terminals';
 import { useHubStore, dollars } from '../state/hub-store';
-import { HANDOFF_LABEL, handoffDetail, handoffPhase, handoffShown, useHandoffStore } from '../state/handoff-store';
+import { HANDOFF_DETAIL, HANDOFF_LABEL, handoffPhase, handoffShown, useHandoffStore } from '../state/handoff-store';
 import { CHANNEL_STATES, channelState, channelTokensToday, limitRatio, usageFor } from '../state/channel-state';
 import { ScopeStrip } from './tile/ScopeStrip';
 import { EngineAvatar } from './tile/EngineAvatar';
@@ -121,7 +121,7 @@ export const SessionTile = memo(function SessionTile({ session, index }: { sessi
   const handing = state === 'limit' ? session : limitSeatId ? useWorkspaceStore.getState().sessions.find((item) => item.id === limitSeatId) ?? null : null;
   const handoff = useHandoffStore((s) => handing ? handoffPhase(s.bySession, handing) : undefined); const automaticMemory = useHubStore((s) => s.preferences.automaticMemory);
   const shown = handing ? handoffShown(handing, useWorkspaceStore.getState().sessions, handing === session ? usage : usageFor(handing, useHubStore.getState().usage), { automaticMemory }, handoff) : 'manual';
-  const handoffTitle = handing ? `${handing === session ? '' : 'A seat at this Round Table is near the end of its context. '}${shown === 'manual' ? 'Write a handoff in Shared memory before the context runs out.' : `${handoffDetail(shown, handing)} Opens Shared memory.`}` : '';
+  const handoffTitle = handing ? `${handing === session ? '' : 'A seat at this Round Table is near the end of its context. '}${shown === 'manual' ? 'Write a handoff in Shared memory before the context runs out.' : `${HANDOFF_DETAIL[shown]} Opens Shared memory.`}` : '';
   const context = usage?.context && usage.context.limit > 0 ? usage.context : null;
   // Claude reports the tokens in context but not its window, so only the amount can be shown.
   const contextUsed = !context && usage?.context && usage.context.used > 0 ? usage.context.used : null;
