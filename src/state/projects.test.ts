@@ -30,7 +30,7 @@ describe('a channel’s project (several projects, step 6)', () => {
     expect(useWorkspaceStore.getState().sessions[0].binding).toEqual({ mode: 'workspace' });
   });
   it('settles which channels show when a project opens: a folder typed in a channel\'s settings does not hide it', async () => {
-    useWorktrees.setState({ list: [], loaded: true }); useShownChannels.setState({ settled: null });
+    useWorktrees.setState({ list: [], loaded: true }); useWorkspaceStore.setState({ rootDirectory: '/code/alpha' }); useShownChannels.setState({ settled: null });
     const a = channel('a'); const b = channel('b', { mode: 'independent', cwd: '/code/beta' });
     expect(shownChannels([a, b], '/code/alpha', []).map((item) => item.id)).toEqual(['a']); await Promise.resolve();
     // Channel a now has another folder (being typed); a new channel c is added: both show until another project opens.
