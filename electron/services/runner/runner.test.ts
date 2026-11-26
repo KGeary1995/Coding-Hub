@@ -182,8 +182,9 @@ describe('Runner', () => {
     ptys[0].pause = () => ptys[0].calls.push('pause'); ptys[0].resume = () => ptys[0].calls.push('resume');
     trace.send(Kind.signal, term, { signal: 'interrupt' }); trace.send(Kind.input, term, '{"type":"user"}\n'); await until(() => ptys[0].written.length === 1);
     expect(ptys[0].written).toEqual(['{"type":"user"}\n']);
-    ptys[0].emit('x'.repeat(64 * 1024));
-    const output = await trace.next(Kind.output); expect(output.payload.length).toBe(64 * 1024);
+    // More than any system's socket buffer (Linux's is larger than 64 KB), so the write is still queued and the chat is paused.
+    const big = 4 * 1024 * 1024; ptys[0].emit('x'.repeat(big));
+    const output = await trace.next(Kind.output); expect(output.payload.length).toBe(big);
     expect(trace.frames.some((frame) => frame.kind === Kind.skipped)).toBe(false);
     await until(() => ptys[0].calls.includes('resume')); expect(ptys[0].calls).toEqual(['pause', 'resume']);
     trace.send(Kind.journal, term); const journal = await trace.next(Kind.journal); expect(journal.payload.readUInt8(0)).toBe(0);
