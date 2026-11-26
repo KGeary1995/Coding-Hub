@@ -73,6 +73,8 @@ export class AcpStream implements ChatStream {
   /** The turn under way: the message being streamed (text and thinking), and whether one is running. */
   private turn = { busy: false, count: 0, messageId: '', text: '', thinking: '', segment: 0 };
   private tools = new Map<string, { title: string; kind: string }>();
+  /** The commands the agent lists (`available_commands_update`): agy's `compact` is run by a prompt of `/compact`. */
+  private commands = new Set<string>();
   private level: PermissionLevel;
   /** `model`: a model ID the agent offers ('' keeps its own). `resumeId`: the agent's session to load. */
   private model: string; private parts: { model: string; level: string };
@@ -199,6 +201,13 @@ export class AcpStream implements ChatStream {
       else this.emit({ type: 'done', isError: false, error: null });
     });
   }
+  /**
+   * Compacts the conversation as a turn of its own (from 1.47, for a Round Table seat's handoff): agy runs a prompt of
+   * `/compact` as its command once it has listed it (agy 1.5.16, checked 2026-11-25: no reply text, and the next turn's
+   * input was smaller by the history). Sent before that list came, agy's model took it as a message, so only then; and
+   * only for agy, the one agent it was checked with. Returns whether it was sent.
+   */
+  compact() { if (!this.agent.agy || !this.commands.has('compact')) return false; this.send('/compact', []); return true; }
   /** `shown`: the request was shown as an approval, so its end is said (one Trace answered itself never was). */
   answer(requestId: string, allow: boolean, _allowEdits = false, shown = true) {
     const pending = this.approvals.get(requestId); if (!pending) return false;
@@ -260,6 +269,10 @@ export class AcpStream implements ChatStream {
     const update = record(record(message.params).update); const kind = text(update.sessionUpdate);
     if (kind === 'config_option_update') { this.readConfig(update.configOptions); this.check(); return; }
     if (kind === 'current_mode_update') { this.config.mode = text(update.currentModeId) || this.config.mode; this.modeChanged(); return; }
+    // The context in use and its window (agy 1.5.16 sends `{ used, size }` with each turn, seen 2026-11-25): the run's
+    // context meter and automatic handoff. Only with a window: no share is made up without one.
+    if (kind === 'available_commands_update') { this.commands = new Set((Array.isArray(update.availableCommands) ? update.availableCommands : []).map((command) => text(record(command).name)).filter(Boolean)); return; }
+    if (kind === 'usage_update') { const { used, size } = update; if (typeof used === 'number' && typeof size === 'number' && Number.isInteger(used) && Number.isInteger(size) && size > 0 && used >= 0) this.emit({ type: 'context-window', size, used }); return; }
     if (this.replay && (kind === 'user_message_chunk' || kind === 'agent_message_chunk')) { this.replayed(kind === 'user_message_chunk' ? 'user' : 'assistant', text(record(update.content).text)); return; }
     if (!this.turn.busy) return;
     if (kind === 'agent_message_chunk') { const piece = text(record(update.content).text); if (piece) { this.turn.text += piece; this.emit({ type: 'delta', messageId: this.messageId(), text: piece }); } return; }

@@ -20,13 +20,23 @@ describe('what a channel near its limit shows about its handoff', () => {
     expect(handoffShown(one, [one], full, {}, 'not-saved')).toBe('manual');
     expect(HANDOFF_LABEL['at-turn-end']).toBe('Handoff at turn end'); expect(HANDOFF_LABEL.manual).toBe('Write handoff');
   });
-  it('leaves it to the person where Trace does not ask: automatic memory off, Gemini, a Round Table, a budget', () => {
+  it('leaves it to the person where Trace does not ask: automatic memory off, Gemini on its own, a hierarchy table, a budget', () => {
     const full = usage(850_000, 1_000_000);
     const one = session(); expect(handoffShown(one, [one], full, { automaticMemory: false })).toBe('manual');
     const gemini = session({ config: { engine: 'gemini', model: '' } }); expect(handoffShown(gemini, [gemini], full, {})).toBe('manual');
-    const lead = session({ roundTable: { partner: 's2', driver: 'claude', rounds: 2 } }); expect(handoffShown(lead, [lead], full, {})).toBe('manual');
+    const geminiChat = session({ config: { engine: 'gemini', chat: true, model: '' } }); expect(handoffShown(geminiChat, [geminiChat], full, {})).toBe('manual');
+    const chain = session({ roundTable: { partner: 's2', driver: 'claude', rounds: 2, kind: 'hierarchy', planner: 's3' } }); const builder = session({ id: 's2' });
+    expect(handoffShown(chain, [chain, builder], full, {})).toBe('manual'); expect(handoffShown(builder, [chain, builder], full, {})).toBe('manual');
     // Near a token budget, with the context well under its limit: a handoff does nothing for a budget.
     const budgeted = session({ budget: { tokens: 10, costUSD: null, contextPercent: 0 } }); expect(handoffShown(budgeted, [budgeted], usage(100_000, 1_000_000), {})).toBe('manual');
+  });
+  it('says what Trace is doing for a discussion Round Table’s seats (1.47), Gemini’s too', () => {
+    const full = usage(850_000, 1_000_000);
+    const lead = session({ roundTable: { partner: 's2', driver: 'claude', rounds: 2 } }); const codex = session({ id: 's2', config: { engine: 'codex', chat: true, model: '', reasoningEffort: null } });
+    const gemini = session({ id: 's3', config: { engine: 'gemini', chat: true, model: '' } }); const all = [lead, codex, gemini];
+    const seated = { ...lead, roundTable: { ...lead.roundTable!, seats: [{ session: 's1' }, { session: 's2' }, { session: 's3' }] } }; const table = [seated, codex, gemini];
+    expect(handoffShown(lead, all, full, {})).toBe('at-turn-end'); expect(handoffShown(codex, table, full, {}, 'asked')).toBe('asked'); expect(handoffShown(gemini, table, full, {}, 'saved')).toBe('saved');
+    expect(handoffShown(gemini, table, full, {})).toBe('at-turn-end'); expect(handoffShown(gemini, table, full, {}, 'compacted')).toBe('saved');
   });
   it('keeps a phase for the run it belongs to: a restarted channel starts again', () => {
     setHandoffPhase('s1', 'r1', 'compacted');
@@ -41,5 +51,11 @@ describe('what a channel near its limit shows about its handoff', () => {
     expect(auto).toMatchObject({ action: 'open' }); expect(auto?.detail).toContain('Trace asked it to save a handoff');
     const manual = needsYou([one], records, [], {}, [], { phases: {}, automaticMemory: false }).find((item) => item.kind === 'limit');
     expect(manual).toMatchObject({ action: 'handoff' }); expect(manual?.detail).toContain('write a handoff');
+  });
+  it('in Needs you, lists a hidden seat near its limit under its lead’s channel, with what Trace is doing for it (1.47)', () => {
+    const lead = session({ roundTable: { partner: 's2', driver: 'claude', rounds: 2 } }); const gemini = session({ id: 's2', runId: 'r2', config: { engine: 'gemini', chat: true, model: '' } });
+    useWorkspaceStore.setState({ sessions: [lead, gemini], tiles: [{ sessionId: 's1', x: 0, y: 0, w: 1, h: 1 }] } as never);
+    const item = needsYou([lead, gemini], [usage(10_000, 1_000_000), usage(950_000, 1_048_576, 's2', 'r2')], [], {}, [], { phases: { s2: { runId: 'r2', phase: 'saved' } } }).find((each) => each.kind === 'limit');
+    expect(item).toMatchObject({ sessionId: 's2', action: 'open', title: expect.stringContaining('CH1') }); expect(item?.detail).toContain('Trace compacts it');
   });
 });

@@ -46,6 +46,7 @@ import { geminiModels, ModelCatalog } from './services/cli/model-catalog';
 import { WorkspaceStorage } from './services/storage/workspace-storage';
 import { saveResume, takeResume } from './services/storage/resume-list';
 import { BackgroundRunner } from './services/runner/background';
+import { Jobs } from './services/runner/jobs';
 import { readPorts, runnerPlace, writePorts } from './services/runner/kit';
 import { ChannelTools } from './services/cli/channel-tools';
 import { EventHooks } from './services/workbench/event-hooks';
@@ -272,6 +273,12 @@ function hookEvent(event: 'needs-you' | 'turn-ended' | 'failed' | 'started' | 's
 let background: BackgroundRunner | null = null;
 function runnerOn() { if (process.env.CODING_HUB_NO_RUNNER) return false; return process.env.CODING_HUB_RUNNER === '1' || (app.isPackaged && hub?.preferences().backgroundRunner !== false); }
 function runner() { if (!runnerOn()) return null; if (!background) { background = new BackgroundRunner(storageRoot, app.getAppPath(), process.execPath); background.meta = (meta) => ({ attention: attention.token(meta.session.runId), tools: channelTools.token(meta.session.runId) }); background.onProblem = (message) => reportStorageError(message); } return background; }
+/**
+ * Windows job objects for the channels Trace runs itself (chats, and terminals with the runner off), through the same
+ * helper as the runner's (dist-electron/native/trace-jobs.exe), started the first time a channel starts.
+ */
+let ownJobs: Jobs | null = null;
+const jobs = () => ownJobs ??= new Jobs(path.join(app.getAppPath(), 'dist-electron', 'native', 'trace-jobs.exe'), (message) => hostHealth?.record('job-helper', message.slice(0, 200)));
 const savedPorts = () => readPorts(runnerPlace(storageRoot));
 function savePorts() { try { writePorts(runnerPlace(storageRoot), { attention: attention.listening, tools: channelTools.listening }); } catch { hostHealth?.record('runner-ports-unsaved'); } }
 /** The tray's Stop all channels and quit: the runner's channels stop too, instead of running on. */
@@ -328,6 +335,7 @@ const manager = new PtyManager((owner, event) => timed(`session-${event.type}`, 
     if (event.type === 'exit' && event.exitCode !== 0 && event.diagnostic) desktopAlert({ title: `${channelLabel(event.sessionId)} stopped with an error`, body: event.diagnostic.split('\n')[0], target: { sessionId: event.sessionId } });
   } catch { hostHealth?.record('desktop-alert-failed'); }
 }), {
+  ...(process.platform === 'win32' ? { jobs: { add: (pid: number) => jobs().add(pid), kill: (pid: number) => jobs().kill(pid), drop: (pid: number) => jobs().drop(pid) } } : {}),
   held: { spawn: (file, args, options, meta) => runner()?.spawn(file, args, options, meta) ?? Promise.reject(new Error('The background runner is off.')), take: (sessionId) => runner()?.take(sessionId) ?? Promise.resolve(null) },
   // A channel taken up after a restart: its agent's hooks and channel tools call with the tokens it was started with.
   // Its usage is not followed again (Usage would count what the run had already read).
@@ -345,7 +353,7 @@ const manager = new PtyManager((owner, event) => timed(`session-${event.type}`, 
   if (envelope.event.type === 'done') hookEvent(envelope.event.isError ? 'failed' : 'turn-ended', envelope.sessionId, envelope.event.isError ? envelope.event.error ?? 'The turn ended with an error.' : 'The agent ended its turn.');
   // Phones and linked computers following the channel get it too.
   try { remote?.onChat(envelope); } catch { hostHealth?.record('remote-event-failed'); }
-}, geminiConversation: (cwd, since, known) => geminiConversationSince(cwd, since, known), chatHistory: (config) => { if (!config.resumeId || config.engine === 'gemini') return null; const file = nativeSessions.source(config.engine, config.resumeId, config.engine === 'claude' ? config.accountProfileId : undefined); return file ? chatHistory(config.engine, file) : null; }, onEventError: () => hostHealth?.record('session-event-delivery-failed'), onContextWindow: (runId, size) => hub?.telemetry?.setContextWindow(runId, size), onStall: () => hostHealth?.record('output-acknowledgement-stalled'), profileEnvironment: (base, id) => claudeProfiles.environment(base, id),
+}, geminiConversation: (cwd, since, known) => geminiConversationSince(cwd, since, known), chatHistory: (config) => { if (!config.resumeId || config.engine === 'gemini') return null; const file = nativeSessions.source(config.engine, config.resumeId, config.engine === 'claude' ? config.accountProfileId : undefined); return file ? chatHistory(config.engine, file) : null; }, onEventError: () => hostHealth?.record('session-event-delivery-failed'), onContextWindow: (runId, size, used) => hub?.telemetry?.setContextWindow(runId, size, used), onStall: () => hostHealth?.record('output-acknowledgement-stalled'), profileEnvironment: (base, id) => claudeProfiles.environment(base, id),
   // Other computers' notes are brought over and read before prepareLaunch builds the memory context (at most 1.5 s).
   safeActions: () => hub?.preferences().safeActions !== false,
   beforeLaunch: (cwd, config) => autoMemory ? autoMemory.ready(cwd, config.engine === 'gemini' || config.engine === 'custom' ? undefined : config.memoryKey) : Promise.resolve(),
@@ -813,6 +821,18 @@ const TEST_HIDDEN = process.env.CODING_HUB_TEST_HIDDEN === '1';
 if (TEST_HIDDEN && process.platform === 'darwin') { try { app.dock?.hide(); app.setActivationPolicy?.('accessory'); } catch { /* Set again once ready. */ } }
 // Nor does it open the person's browser: a link it would open is only noted (a test that checks one replaces this itself).
 if (TEST_HIDDEN) { const opened: string[] = []; (globalThis as { traceTestOpened?: string[] }).traceTestOpened = opened; shell.openExternal = async (url: string) => { opened.push(url); }; }
+// Nor a message box or file picker, which macOS shows even while the window is hidden (a test quitting with channels
+// left running asked whether to try again): each is answered with its safe choice and noted (a test that needs one
+// replaces it itself, as the smoke tests do with app.evaluate).
+if (TEST_HIDDEN) {
+  const asked: string[] = []; (globalThis as { traceTestDialogs?: string[] }).traceTestDialogs = asked;
+  const answer = (args: unknown[]) => { const options = (args.find((arg) => arg && typeof arg === 'object' && 'message' in (arg as object)) ?? {}) as Electron.MessageBoxOptions; asked.push(options.message ?? ''); return { response: options.cancelId ?? options.defaultId ?? 0, checkboxChecked: false }; };
+  dialog.showMessageBox = (async (...args: unknown[]) => answer(args)) as typeof dialog.showMessageBox;
+  dialog.showMessageBoxSync = ((...args: unknown[]) => answer(args).response) as typeof dialog.showMessageBoxSync;
+  dialog.showErrorBox = (title: string, content: string) => { asked.push(`${title}: ${content}`); };
+  dialog.showOpenDialog = (async () => ({ canceled: true, filePaths: [] })) as typeof dialog.showOpenDialog;
+  dialog.showSaveDialog = (async () => ({ canceled: true, filePath: '' })) as typeof dialog.showSaveDialog;
+}
 /** Opened at sign-in: the window waits hidden, with the tray icon, until the person opens it (only while closing the window keeps Trace running). */
 function startedHidden() {
   if (!closeToTray()) return false;

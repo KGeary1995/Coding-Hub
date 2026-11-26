@@ -19,10 +19,12 @@ import { AUTH_TIMED_OUT } from './auth-status';
 import { geminiConversations } from './gemini-conversations';
 import { cleanMessage, codexApproval, GeminiStatusReader, OscNotifications, type GeminiStatus } from './attention';
 import { ScreenReader } from './screen-reader';
-import { nodePty, ptyProcessEnded } from './native-pty';
+import { conptyOptions, nodePty, ptyProcessEnded } from './native-pty';
 import { CHAT_ARGS, ClaudeStream, type ChatStream } from '../chat/claude-stream';
 import { CodexStream, type CodexThreadOptions } from '../chat/codex-stream';
 import { GeminiStream } from '../chat/gemini-stream';
+import { GEMINI_MEMORY_SERVER } from '../hub/gemini-plugin';
+import { handoffRequest } from '../../../shared/hub';
 import { AcpStream, type AcpAgent } from '../chat/acp-stream';
 import { RoundTables, type TableHost } from '../chat/round-table';
 import { legacySeats, ReviewChains } from '../chat/review-chain';
@@ -113,6 +115,9 @@ export interface HeldTerminals {
  */
 /** A title the CLI gives its terminal (OSC 0 or 2): Claude Code's task summary, for phones. */
 const TITLE = /\x1b\](?:0|2);([^\x07\x1b]{0,200})(?:\x07|\x1b\\)/g;
+/** Windows job objects (runner/jobs.ts) for the runs Trace starts itself, as the runner has for its terminals. */
+export interface RunJobs { add(pid: number): unknown; kill(pid: number): Promise<unknown>; drop(pid: number): unknown }
+
 export const HIGH_WATER = 1024 * 1024; export const LOW_WATER = 256 * 1024; const STALL_MS = 5000;
 /** How long a run whose screen stopped showing work must stay quiet before Trace takes the turn as ended (settledTurn). */
 export const SETTLED_MS = !process.env.CODING_HUB_TEST_SETTLED_MS ? 8000 : Number(process.env.CODING_HUB_TEST_SETTLED_MS);
@@ -154,6 +159,8 @@ interface ManagedRun {
   turnOpen?: boolean;
   /** Its terminal is in the background runner: quitting Trace leaves it running (docs/background-runner.md). */
   held?: boolean;
+  /** Started here and put in a Windows job (`jobs`): Stop ends the job too, and its end lets go of it. */
+  job?: boolean;
 }
 
 export class PtyManager {
@@ -166,7 +173,7 @@ export class PtyManager {
 
   constructor(
     private emit: (owner: number, event: SessionEvent) => void,
-    private dependencies: { onEventError?: () => void; /** The person's safe commands setting (on unless false), for Gemini chats. */ safeActions?: () => boolean; onContextWindow?: (runId: string, size: number) => void;stopDependencies?: StopDependencies; spawn?: Spawn; discover?: typeof discoverEngine; environment?: () => Record<string, string> | Promise<Record<string, string>>; profileEnvironment?: (base: Record<string, string>, id?: string) => Record<string, string>; onStarted?: (session: AgentRunningSession, config: AgentConfig, owner: number) => void; prepareLaunch?: (session: BuiltInRunningSession, config: CLIEngineConfig, info: EngineInfo, launch: { args: string[]; env: Record<string, string> }) => void;
+    private dependencies: { onEventError?: () => void; /** The person's safe commands setting (on unless false), for Gemini chats. */ safeActions?: () => boolean; onContextWindow?: (runId: string, size: number, used?: number) => void;stopDependencies?: StopDependencies; spawn?: Spawn; discover?: typeof discoverEngine; environment?: () => Record<string, string> | Promise<Record<string, string>>; profileEnvironment?: (base: Record<string, string>, id?: string) => Record<string, string>; onStarted?: (session: AgentRunningSession, config: AgentConfig, owner: number) => void; prepareLaunch?: (session: BuiltInRunningSession, config: CLIEngineConfig, info: EngineInfo, launch: { args: string[]; env: Record<string, string> }) => void;
       /**
        * Work an agent launch waits for before prepareLaunch (a project's shared memory brought up to date), started with
        * discovery. Its errors are ignored, and a launch waits at most `beforeLaunchMilliseconds` (default 3 s) for it.
@@ -194,12 +201,14 @@ export class PtyManager {
       /** The IDs of the conversations agy already had when a run started: none of them is that run's (tests replace it). */
       geminiKnown?: () => string[];
       held?: HeldTerminals;
+      /** Windows: the runs started here (not in the runner) each go in a job object, so Stop ends what left their tree. */
+      jobs?: RunJobs;
       /** A terminal the runner kept while Trace was closed was taken up again: what prepareLaunch set up for it is restored. */
       onAdopted?: (session: RunningSession, meta: HeldMeta, owner: number) => void;
       /** A plugin tile's program (plugins.ts), looked up by the plugin and tile the channel names. */
       pluginTile?: (plugin: { id: string; tile: string }) => { file: string; args: string[]; env: Record<string, string> } } = {},
   ) {
-    this.spawn = dependencies.spawn ?? ((file, args, options) => nodePty().spawn(file, args, options));
+    this.spawn = dependencies.spawn ?? ((file, args, options) => nodePty().spawn(file, args, { ...options, ...conptyOptions() }));
     this.discover = dependencies.discover ?? discoverEngine;
     this.environment = dependencies.environment ?? freshHostEnvironment;
   }
@@ -375,7 +384,7 @@ export class PtyManager {
       let resolveExit!: () => void;
       const exit = new Promise<void>((resolve) => { resolveExit = resolve; });
       const run: ManagedRun = { owner, session, pty, nativeKey, outputTail: '', pendingData: '', exit, resolveExit, stopping: null, finished: false, unacked: 0, paused: false, ...(session.engine === 'codex' ? { osc: new OscNotifications() } : {}), ...(session.engine === 'gemini' && !chat ? { gemini: { reader: new GeminiStatusReader(), last: null, since: Date.now(), known: this.geminiKnown() } } : {}), ...(session.engine !== 'gemini' && session.engine !== 'shell' && !chat ? { status7501: { reader: new GeminiStatusReader(), last: null } } : {}) };
-      if (held) run.held = true;
+      if (held) run.held = true; else if (this.dependencies.jobs) { run.job = true; void this.dependencies.jobs.add(pty.pid); }
       if (request.config.engine === 'custom') { run.agentName = agentName; if (!chat) run.custom = this.customReader(run, customStatus, request.cols, request.rows); }
       // The first request went in as arguments: the agent's first turn is under way without an Enter, and is not typed again.
       if (prompted) { run.custom?.begin(); session.prompted = true; }
@@ -455,7 +464,7 @@ export class PtyManager {
     const emit = (event: import('../../../shared/chat').ChatEvent) => {
       if (run.finished && event.type !== 'permission-done') return;
       // The window size goes with the run's usage (and from there to every view), not into the conversation.
-      if (event.type === 'context-window') { try { this.dependencies.onContextWindow?.(runId, event.size); } catch { this.dependencies.onEventError?.(); } return; }
+      if (event.type === 'context-window') { try { this.dependencies.onContextWindow?.(runId, event.size, event.used); } catch { this.dependencies.onEventError?.(); } return; }
       // A Round Table's reviewer asking to edit is declined at once: a line in the thread instead of an approval card.
       // At Full access its commands are allowed at once ('' : nothing to show), with no card or alert either.
       if (event.type === 'permission') { const handled = this.tables.observe({ sessionId, runId, event }) ?? this.chains.observe({ sessionId, runId, event }); if (handled !== null) { if (handled) emit({ type: 'notice', text: handled }); return; } }
@@ -511,7 +520,7 @@ export class PtyManager {
     else if (request.action === 'compact') {
       if (!run.chat.compact) throw new HubError('COMPACT_UNAVAILABLE', 'This agent cannot compact its conversation from Trace.');
       if (run.turnOpen) throw new HubError('CHAT_BUSY', 'The agent is still answering. Compact once its turn has ended.');
-      run.turnOpen = true; run.chat.compact();
+      run.turnOpen = true; if (run.chat.compact() === false) { run.turnOpen = false; throw new HubError('COMPACT_UNAVAILABLE', 'This agent cannot compact its conversation yet.'); }
       try { this.dependencies.onChat?.(owner, { sessionId: request.sessionId, runId: request.runId, event: { type: 'user', text: '/compact', images: 0 } }); } catch { /* The thread shows it from the window's own send. */ }
     }
     else if (request.action === 'answer') { if (!run.chat.answer(request.requestId, request.allow, request.allowEdits)) throw new HubError('ANSWERED', 'That request was already answered.'); }
@@ -550,6 +559,12 @@ export class PtyManager {
       if (this.chains.has(request.runId)) this.chains.send(request.runId, request.text, request.images); else this.tables.send(request.runId, request.text, request.images);
       try { this.dependencies.onChat?.(owner, { sessionId: request.sessionId, runId: request.runId, event: { type: 'user', text: request.text, images: request.images.length, ...(remote ? { remote: true as const } : {}) } }); } catch { this.dependencies.onEventError?.(); }
     }
+    else if (request.action === 'table-handoff' || request.action === 'table-compact') {
+      // A seat's automatic handoff: only at a discussion table (a hierarchy's steps keep every seat's turns their own).
+      if (!this.tables.leads(request.runId)) throw new HubError('TABLE_HANDOFF', 'Trace saves a seat\'s handoff by itself only at a discussion Round Table.');
+      const seat = find(request.seat); if (seat.owner !== owner) throw new HubError('STALE_SESSION', 'Those chats are not in the same window.');
+      this.tables.aside(request.runId, request.seat.runId, request.action === 'table-handoff' ? handoffRequest(request.percent, seat.session.engine === 'gemini' ? GEMINI_MEMORY_SERVER : undefined, true) : null);
+    }
     else if (request.action === 'table-plan') this.chains.plan(request.runId, request.approve, request.note);
     else if (request.action === 'table-continue') this.chains.continue(request.runId, request.skipChallenge === true);
     else if (request.action === 'table-review-again') this.chains.reviewAgain(request.runId);
@@ -579,6 +594,7 @@ export class PtyManager {
     setReadOnly: (runId, readOnly) => this.chatRun(runId)?.chat?.setReadOnly(readOnly),
     answer: (runId, requestId, allow) => { this.chatRun(runId)?.chat?.answer(requestId, allow); },
     interrupt: (runId) => this.chatRun(runId)?.chat?.interrupt(),
+    compact: (runId) => { const run = this.chatRun(runId); if (!run?.chat?.compact || run.turnOpen) return false; run.turnOpen = true; if (run.chat.compact() !== false) return true; run.turnOpen = false; return false; },
     emit: (owner, envelope) => { try { this.dependencies.onChat?.(owner, envelope); } catch { this.dependencies.onEventError?.(); } },
     stateOf: (cwd) => repositoryState(cwd),
   }; }
@@ -706,6 +722,8 @@ export class PtyManager {
       if (conversationId) this.send(run.owner, { type: 'conversation', sessionId: run.session.sessionId, runId: run.session.runId, conversationId: conversationId.toLowerCase() });
     }
     run.finished = true; if (run.stall) clearTimeout(run.stall); run.chat?.close();
+    // A run being stopped lets go of its job once Stop has ended it (terminate), not before.
+    if (run.job && !run.stopping) void this.dependencies.jobs?.drop(run.pty.pid);
     if (run.chat) { try { this.tables.ended(run.session.runId); } catch { /* The table is gone with it. */ } try { this.chains.ended(run.session.runId); } catch { /* The table is gone with it. */ } }
     this.flush(run);
     if (this.runs.get(run.session.sessionId) === run) this.runs.delete(run.session.sessionId);
@@ -719,8 +737,10 @@ export class PtyManager {
   }
 
   private async terminate(run: ManagedRun): Promise<void> {
-    try { if (await stopProcess(run.pty, run.exit, this.dependencies.stopDependencies)) this.finish(run, 130); }
+    const jobs = run.job ? this.dependencies.jobs : undefined;
+    try { if (await stopProcess(run.pty, run.exit, jobs ? { ...this.dependencies.stopDependencies, endJob: (pid) => jobs.kill(pid) } : this.dependencies.stopDependencies)) this.finish(run, 130); }
     catch (error) { run.stopping = null; throw error; }
+    finally { if (jobs && run.finished) void jobs.drop(run.pty.pid); }
   }
 
   async stopOwner(owner: number) {

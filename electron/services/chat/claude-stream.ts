@@ -34,8 +34,8 @@ export interface ChatStream {
   setPermissions(level: PermissionLevel): void;
   /** The level the person set for this channel (a Round Table's read-only seat keeps it, for what it may do without asking). */
   permissions(): PermissionLevel;
-  /** Compacts the conversation as one turn, where the agent can (1.43.0): it ends with `done`, as a message's turn does. */
-  compact?(): void;
+  /** Compacts the conversation as one turn, where the agent can (1.43.0): it ends with `done`, as a message's turn does. False: not now (Gemini before agy lists its command), and nothing was sent. */
+  compact?(): void | boolean;
 }
 
 export class ClaudeStream implements ChatStream {

@@ -10,7 +10,7 @@ import { RUNNER_PROTOCOL } from './protocol';
  * from there: Electron's executable and the four files it needs as Node, the runner's scripts and node-pty are copied
  * into Trace's storage folder, into a folder named by their contents, once for each version of them.
  */
-const RUNNER_SCRIPTS = ['runner-main.js', 'runner.js', 'protocol.js', 'tail.js', 'jobs.js'];
+const RUNNER_SCRIPTS = ['runner-main.js', 'runner.js', 'protocol.js', 'tail.js', 'journal.js', 'jobs.js'];
 /** Electron as Node needs only these beside its executable (checked 2026-11-24 with node-pty under Electron 39). */
 const WINDOWS_RUNTIME = ['ffmpeg.dll', 'icudtl.dat', 'snapshot_blob.bin', 'v8_context_snapshot.bin'];
 export const RUNNER_EXECUTABLE = 'Trace Runner.exe';
@@ -40,6 +40,7 @@ export function kitFiles(appPath: string, execPath: string, platform: NodeJS.Pla
   const built = path.join(appPath, 'dist-electron', 'electron', 'services');
   for (const name of RUNNER_SCRIPTS) files.push({ from: path.join(built, 'runner', name), to: path.join('app', 'dist-electron', 'electron', 'services', 'runner', name) });
   files.push({ from: path.join(built, 'cli', 'native-pty.js'), to: path.join('app', 'dist-electron', 'electron', 'services', 'cli', 'native-pty.js') });
+  files.push({ from: path.join(built, 'chat', 'chat-process.js'), to: path.join('app', 'dist-electron', 'electron', 'services', 'chat', 'chat-process.js') });
   // node-pty finds its binary in build/Release (a local build) or prebuilds/<platform>-<arch>.
   const pty = path.join(appPath, 'node_modules', 'node-pty');
   for (const part of ['package.json', 'lib', path.join('prebuilds', `${platform}-${arch}`), path.join('build', 'Release')]) for (const file of walk(path.join(pty, part))) files.push({ from: file, to: path.join('app', 'node_modules', 'node-pty', path.relative(pty, file)) });
@@ -87,9 +88,11 @@ export function ensureKit(place: RunnerPlace, appPath: string, execPath: string,
  */
 export function removeOldKits(place: RunnerPlace, keep: string[]) {
   let names: string[]; try { names = fs.readdirSync(place.kits); } catch { return; }
-  const kept = new Set(keep.map((folder) => path.resolve(folder).toLowerCase()));
+  // Real paths: the runner names its kit as its own path resolves (a Mac's /var is /private/var), so a kit in use is never taken for an old one.
+  const real = (folder: string) => { try { return fs.realpathSync(folder).toLowerCase(); } catch { return path.resolve(folder).toLowerCase(); } };
+  const kept = new Set(keep.map(real));
   for (const name of names) {
-    const folder = path.join(place.kits, name); if (kept.has(path.resolve(folder).toLowerCase())) continue;
+    const folder = path.join(place.kits, name); if (kept.has(real(folder))) continue;
     const trash = name.endsWith('.trash') ? folder : `${folder}.${process.pid}.trash`;
     try { if (trash !== folder) fs.renameSync(folder, trash); fs.rmSync(trash, { recursive: true, force: true }); } catch { /* In use: removed another time. */ }
   }

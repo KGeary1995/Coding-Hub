@@ -2,6 +2,7 @@ import { timingSafeEqual } from 'node:crypto';
 import type { Socket } from 'node:net';
 import { encode, FrameReader, json, Kind, RUNNER_PROTOCOL, type Frame, type RunnerTerminal, type SpawnRequest } from './protocol';
 import { Tail } from './tail';
+import { Journal } from './journal';
 
 /** What the runner needs of a terminal: node-pty's IPty, or a stand-in in tests. */
 export interface RunnerPty {
@@ -9,6 +10,8 @@ export interface RunnerPty {
   onData(listener: (data: string) => void): unknown;
   onExit(listener: (event: { exitCode: number; signal?: number }) => void): unknown;
   write(data: string): void; resize(cols: number, rows: number): void; kill(): void; pause?(): void; resume?(): void;
+  /** A pipe run's stderr (chat-process.ts); a terminal has none. */
+  onStderr?(listener: (data: string) => void): unknown;
 }
 export interface RunnerDependencies {
   spawn(request: SpawnRequest): RunnerPty;
@@ -20,11 +23,13 @@ export interface RunnerDependencies {
   /** Output queued for Trace beyond this is not sent (it stays in the tail), herdr's 8 MB. */
   sendLimit?: number;
   tailBytes?: number;
+  journalBytes?: number;
   /** The kit folder the runner runs from, told to Trace so it never deletes it (kit.ts). */
   home?: string;
 }
 
-interface Terminal { term: number; id: string; pty: RunnerPty; tail: Tail; cols: number; rows: number; exitCode?: number; exited: Promise<void>; skipped: boolean; paused: boolean; meta?: unknown }
+/** `journal`: a pipe run's (a chat); its `tail` then keeps the stderr. */
+interface Terminal { term: number; id: string; pty: RunnerPty; tail: Tail; journal?: Journal; cols: number; rows: number; exitCode?: number; exited: Promise<void>; skipped: boolean; paused: boolean; held?: boolean; meta?: unknown }
 
 /**
  * The background runner (docs/background-runner.md): owns every terminal so channels outlive Trace, and nothing else.
@@ -44,7 +49,7 @@ export class Runner {
     socket.on('close', () => {
       clearTimeout(helloTimer); if (this.client !== socket) return;
       // Nobody is left to resume a program Trace paused: it reads on, into its tail.
-      this.client = null; for (const terminal of this.terminals.values()) this.setPaused(terminal, false); this.idle();
+      this.client = null; for (const terminal of this.terminals.values()) { if (terminal.held) { terminal.held = false; if (!terminal.paused) try { terminal.pty.resume?.(); } catch { /* It ended. */ } } this.setPaused(terminal, false); } this.idle();
     });
     socket.on('drain', () => this.caughtUp(socket));
     socket.on('data', (chunk: Buffer) => {
@@ -57,7 +62,7 @@ export class Runner {
           greeted = true; clearTimeout(helloTimer); current = hello.version === RUNNER_PROTOCOL;
           // A Trace on another protocol may only drain this runner (an update): it runs its own runner beside this one.
           if (current) { const previous = this.client; this.client = socket; previous?.destroy(); this.busy(); }
-          this.send(socket, encode(Kind.welcome, 0, { version: RUNNER_PROTOCOL, pid: process.pid, draining: this.draining, ...(this.dependencies.home ? { home: this.dependencies.home } : {}) }));
+          this.send(socket, encode(Kind.welcome, 0, { version: RUNNER_PROTOCOL, pid: process.pid, draining: this.draining, pipes: true, ...(this.dependencies.home ? { home: this.dependencies.home } : {}) }));
           continue;
         }
         if (!current) { if (frame.kind === Kind.drain) this.drain(); else this.send(socket, encode(Kind.error, 0, { message: `This runner speaks protocol ${RUNNER_PROTOCOL}.` })); continue; }
@@ -69,7 +74,7 @@ export class Runner {
   }
 
   /** Running and ended-but-not-forgotten terminals, oldest first. */
-  list(): RunnerTerminal[] { return [...this.terminals.values()].map(({ term, id, pty, cols, rows, exitCode, meta }) => ({ term, id, pid: pty.pid, cols, rows, ...(exitCode === undefined ? {} : { exitCode }), ...(meta === undefined ? {} : { meta }) })); }
+  list(): RunnerTerminal[] { return [...this.terminals.values()].map(({ term, id, pty, cols, rows, exitCode, meta, journal }) => ({ term, id, pid: pty.pid, cols, rows, ...(exitCode === undefined ? {} : { exitCode }), ...(meta === undefined ? {} : { meta }), ...(journal ? { pipe: true as const } : {}) })); }
 
   private handle(socket: Socket, frame: Frame) {
     if (frame.kind === Kind.spawn) { this.spawn(socket, frame); return; }
@@ -78,7 +83,7 @@ export class Runner {
     const terminal = this.terminals.get(frame.term);
     if (!terminal) { this.send(socket, encode(Kind.error, frame.term, { message: `No terminal ${frame.term}.` })); return; }
     const running = terminal.exitCode === undefined;
-    if (frame.kind === Kind.input) { if (running) terminal.pty.write(frame.payload.toString('utf8')); }
+    if (frame.kind === Kind.input) { if (running) { terminal.journal?.add('in', frame.payload); terminal.pty.write(frame.payload.toString('utf8')); } }
     else if (frame.kind === Kind.resize) {
       const size = safeJson<{ cols?: unknown; rows?: unknown }>(frame); const cols = Number(size?.cols); const rows = Number(size?.rows);
       // node-pty throws on a resize after the process ended (Windows reports the exit late).
@@ -86,10 +91,12 @@ export class Runner {
     } else if (frame.kind === Kind.signal) {
       const signal = safeJson<{ signal?: unknown }>(frame)?.signal;
       if (!running) return;
-      if (signal === 'interrupt') terminal.pty.write('\x03');
+      // A chat is interrupted by its own protocol (Trace writes it as input), never by a Ctrl+C byte.
+      if (signal === 'interrupt') { if (!terminal.journal) terminal.pty.write('\x03'); }
       else if (signal === 'stop') void (this.dependencies.stop ? this.dependencies.stop(terminal.pty, terminal.exited) : Promise.resolve(terminal.pty.kill())).catch(() => {});
     } else if (frame.kind === Kind.pause || frame.kind === Kind.resume) { if (running) this.setPaused(terminal, frame.kind === Kind.pause); }
     else if (frame.kind === Kind.tail) this.send(socket, encode(Kind.tail, terminal.term, terminal.tail.read()));
+    else if (frame.kind === Kind.journal) { if (terminal.journal) this.send(socket, encode(Kind.journal, terminal.term, terminal.journal.encode())); else this.send(socket, encode(Kind.error, terminal.term, { message: `Terminal ${terminal.term} is not a chat.` })); }
     else if (frame.kind === Kind.forget) { if (!running) this.terminals.delete(terminal.term); this.idle(); }
   }
 
@@ -100,9 +107,10 @@ export class Runner {
     let pty: RunnerPty;
     try { pty = this.dependencies.spawn(request); } catch (error) { this.send(socket, encode(Kind.error, 0, { id: request.id, message: error instanceof Error ? error.message : String(error) })); return; }
     let ended!: () => void; const exited = new Promise<void>((resolve) => { ended = resolve; });
-    const terminal: Terminal = { term: this.next++, id: request.id, pty, tail: new Tail(this.dependencies.tailBytes), cols: request.cols, rows: request.rows, exited, skipped: false, paused: false, ...(request.meta === undefined ? {} : { meta: request.meta }) };
+    const terminal: Terminal = { term: this.next++, id: request.id, pty, tail: new Tail(this.dependencies.tailBytes), ...(request.pipe ? { journal: new Journal(this.dependencies.journalBytes) } : {}), cols: request.cols, rows: request.rows, exited, skipped: false, paused: false, ...(request.meta === undefined ? {} : { meta: request.meta }) };
     this.terminals.set(terminal.term, terminal); this.busy();
-    pty.onData((data) => { const bytes = Buffer.from(data, 'utf8'); terminal.tail.append(bytes); this.forward(terminal, bytes); });
+    pty.onData((data) => { const bytes = Buffer.from(data, 'utf8'); if (terminal.journal) terminal.journal.add('out', bytes); else terminal.tail.append(bytes); this.forward(terminal, bytes); });
+    pty.onStderr?.((data) => { const bytes = Buffer.from(data, 'utf8'); terminal.tail.append(bytes); if (this.client) this.send(this.client, encode(Kind.stderr, terminal.term, bytes)); });
     pty.onExit(({ exitCode, signal }) => {
       if (terminal.exitCode !== undefined) return;
       terminal.exitCode = exitCode; ended();
@@ -114,6 +122,8 @@ export class Runner {
 
   private forward(terminal: Terminal, bytes: Buffer) {
     const client = this.client; if (!client) return;
+    // A chat cannot skip a line: it is sent, and the program waits (its stdout is not read) until Trace has caught up.
+    if (terminal.journal) { this.send(client, encode(Kind.output, terminal.term, bytes)); if (!terminal.held && client.writableLength > (this.dependencies.sendLimit ?? 8 * 1024 * 1024)) { terminal.held = true; try { terminal.pty.pause?.(); } catch { /* It ended. */ } } return; }
     // Trace fell behind: the output stays in the tail, and Trace is told to read it once its queue empties.
     if (terminal.skipped || client.writableLength > (this.dependencies.sendLimit ?? 8 * 1024 * 1024)) { terminal.skipped = true; return; }
     this.send(client, encode(Kind.output, terminal.term, bytes));
@@ -125,12 +135,15 @@ export class Runner {
    * miss a short queue: Node raises it only after a write that filled the socket's buffer. */
   private caughtUp(socket: Socket) {
     if (this.client !== socket || socket.writableLength > 0) return;
-    for (const terminal of this.terminals.values()) if (terminal.skipped) { terminal.skipped = false; this.send(socket, encode(Kind.skipped, terminal.term)); }
+    for (const terminal of this.terminals.values()) {
+      if (terminal.skipped) { terminal.skipped = false; this.send(socket, encode(Kind.skipped, terminal.term)); }
+      if (terminal.held) { terminal.held = false; if (!terminal.paused) try { terminal.pty.resume?.(); } catch { /* It ended. */ } }
+    }
   }
 
   private setPaused(terminal: Terminal, paused: boolean) {
     if (terminal.paused === paused || terminal.exitCode !== undefined) return;
-    terminal.paused = paused; try { if (paused) terminal.pty.pause?.(); else terminal.pty.resume?.(); } catch { /* It ended. */ }
+    terminal.paused = paused; try { if (paused) terminal.pty.pause?.(); else if (!terminal.held) terminal.pty.resume?.(); } catch { /* It ended. */ }
   }
 
   private drain() { this.draining = true; this.finishDrain(); }

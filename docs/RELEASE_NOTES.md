@@ -1,5 +1,15 @@
 ## What's new
 
+1.47.0 brings the automatic handoff to Round Tables, makes Start in order's first request safe with Codex's startup questions, stops Windows channels completely, and prepares chats to keep running after Trace closes.
+
+- **The automatic handoff now covers Round Table seats.** Near the end of its context, a Claude Code, Codex or Gemini seat at a discussion table is asked for its handoff on its own once the table rests, and compacted once it is saved. Nothing of that turn goes to the other seats, and a message you send meanwhile waits for it. A Gemini seat now reports how full its context is, and is compacted with agy's own compact command. A hidden seat shows on its lead's tile and in Needs you. Not tried yet with real agents at a table.
+- **Start in order no longer loses a first request to Codex's startup questions.** After a question such as trusting the folder is answered, Trace waits for 10 quiet seconds (not 3) before typing, because Codex can show its review of a new hook a few seconds later. If one of those questions appears just after the request was typed, the tile offers **Send first request** again.
+- **On Windows, stopping a chat channel, or a terminal with the background runner off, also ends programs it started that left its process tree** (job objects, as the background runner already did).
+- **Chats can run in the background runner** (not used yet): the runner can start a chat with plain pipes and keep everything sent each way, in order (8 MB a chat), so a later release can keep chats running while Trace is closed and take them up again. A runner kept across this update keeps showing its terminals.
+- **Fixed on a Mac:** a Trace that opened again could delete the background runner's own files when Trace's storage folder was reached through a link.
+- **For developers:** tests no longer put Trace's message boxes on your screen; on CI runners the test window is shown again. `CODING_HUB_CONPTY_DLL=1` tries node-pty's bundled ConPTY on Windows (experimental, off by default; see docs/troubleshooting.md).
+- **Not tried yet:** the Round Table handoff with real agents at a table, and the Windows job objects and ConPTY switch on a real Windows PC (they are checked by the Windows release candidate).
+
 1.46.0 organises channels by project, syncs your projects between computers, and makes controlling administrator apps over screen sharing safe.
 
 - **Channels by project.** The grid shows the open project's channels only. A channel belongs to the folder it works in (a worktree to the repository it came from). Opening another project keeps the open one's channels with it, and the other projects' channels keep running. The project menu lists each project with channels, and **All projects** shows every channel at once. A channel's status bar chip, Needs you or a notice opens its project. Changing a channel's folder in its settings no longer moves it out of sight while you type; it joins its new folder's project the next time you switch.

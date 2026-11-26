@@ -1,6 +1,6 @@
 # Runner step 4: chat channels in the background runner
 
-Status: **draft for the owner to review** (2026-11-25). Nothing here is built. Follows [background-runner.md](../background-runner.md), whose step 4 says it needs its own design.
+Status: **steps 1 to 4 built** (1.46.0 and 1.47.0). Steps 5 and later are not: chats still start in Trace's main process. The owner chose to go ahead (2026-11-25). Follows [background-runner.md](../background-runner.md), whose step 4 says it needs its own design.
 
 ## Problem
 
@@ -96,10 +96,11 @@ Each step is its own release, as in background-runner.md.
    - Tests: a new `chat/replay.test.ts` for Claude, Codex and ACP. Expect identical writes after ids and clocks are injected.
 2. **Make streams deterministic.** Add an `ids` and `clock` option to `ClaudeStream`, `CodexStream`, `AcpStream` (default `randomUUID` and real timers). No behaviour change.
    - Tests: existing stream tests unchanged; new tests with a fixed id source.
-3. **Runner pipe runs.** Add `pipe: true` to `SpawnRequest`. `runner-main.ts` spawns with `child_process.spawn` and pipes, as `spawnChatProcess` does. Bump `RUNNER_PROTOCOL` to 2, so DRAIN of protocol 1 (step 6 of background-runner.md) must come first or with it.
-   - Tests: `runner.test.ts` (pipe spawn, input, exit, stderr kept apart), `test:runner` with a real child.
-4. **Journal in the runner.** A `Journal` beside `Tail`: ordered entries `{ dir: 'in' | 'out', line }`, capped (size to decide). A `journal` frame returns it; an `overflowed` flag says it was cut.
-   - Tests: ordering, cap, overflow flag, UTF-8 cut handling.
+3. **Runner pipe runs. Built (1.47.0).** `SpawnRequest.pipe`; `runner-main.ts` starts it with `spawnChatProcess` itself (`chat/chat-process.js` is now in the kit). Its stdout is sent as output, its stderr as `stderr` frames and kept in its tail. A chat is never sent the Ctrl+C byte (its own protocol interrupts it), and when Trace falls behind it is paused, never skipped (a chat cannot lose a line).
+   - **No protocol bump.** The plan was protocol 2, but a new protocol leaves the terminals of a runner on the old one running where the new Trace cannot see them. Instead the additions are optional: a runner that has them says `pipes: true` in its welcome (`RunnerClient.pipes`), and Trace sends chats only to such a runner. An older runner keeps serving its terminals until it leaves when idle; the next one starts from the new kit.
+   - Tests: `runner.test.ts`, `client.test.ts`, and `npm run test:runner` with a real child.
+4. **Journal in the runner. Built (1.47.0).** `runner/journal.ts`: chunks as they came, both directions in order (a direction's run of pieces is one entry), capped at 8 MB a chat (`JOURNAL_BYTES`; 64 MB with eight channels). Past the cap it is dropped and marked overflowed, since a replay needs the start. The `journal` frame is binary (no second JSON escaping); `RunnerClient.journal(term)` reads it.
+   - Tests: `journal.test.ts` (order, joining, cap, bad bytes), the runner and client tests above.
 5. **Chats start in the runner.** Remove the `!chat` guard on `held.spawn` behind a preference (off by default). Writes go through the runner and into the journal.
    - Tests: `pty-manager.test.ts` with a fake `HeldTerminals` for chats.
 6. **Adopt a chat.** In `PtyManager.start`, `take()` for chats too. Build the stream, replay the journal muted, then attach live. If the journal overflowed, stop the process and start a resume instead.
@@ -121,7 +122,7 @@ Each step is its own release, as in background-runner.md.
 ## Open questions for the owner
 
 1. Is option B acceptable, given it needs a spike before any commitment?
-2. What journal cap is acceptable (memory per chat in the runner)? 8 chats can be open (`MAX_CHANNELS` in `shared/schemas.ts`).
+2. What journal cap is acceptable (memory per chat in the runner)? 8 chats can be open (`MAX_CHANNELS` in `shared/schemas.ts`). **Set to 8 MB a chat for now** (1.47.0); say if that should change.
 3. Should Round Table seats be held in a later step, or never?
 4. Should a chat waiting for approval while Trace is closed raise a system notification from the runner? That would add UI code to the runner.
 

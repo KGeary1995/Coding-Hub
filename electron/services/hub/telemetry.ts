@@ -247,10 +247,12 @@ export class TelemetryService {
   private select!: StatementSync; private upsert!: StatementSync; private writing = false;
   /** Context window sizes Claude reported for running runs (a chat's reply, a terminal's status line), by run. */
   private windows = new Map<string, number>();
-  /** A run's context window as Claude reported it; its usage is published again so the bar fills at once. */
-  setContextWindow(runId: string, size: number) {
-    if (!Number.isInteger(size) || size < 1000 || size > 100_000_000 || this.windows.get(runId) === size || this.closed) return;
-    this.windows.set(runId, size);
+  /** The tokens in context a run reported with its window (a Gemini chat's `usage_update`): its conversation file has none. */
+  private inUse = new Map<string, number>();
+  /** A run's context window as Claude reported it (with what is in use, as Gemini reports it); its usage is published again so the bar fills at once. */
+  setContextWindow(runId: string, size: number, used?: number) {
+    if (!Number.isInteger(size) || size < 1000 || size > 100_000_000 || (used !== undefined && (!Number.isInteger(used) || used < 0)) || (this.windows.get(runId) === size && this.inUse.get(runId) === used) || this.closed) return;
+    this.windows.set(runId, size); if (used !== undefined) this.inUse.set(runId, used);
     const usage = this.runUsage(runId); if (usage) this.publish(usage);
   }
   /** Told once per run when its usage log keeps failing to read (main shows it); token limits depend on that log. */
@@ -419,7 +421,9 @@ export class TelemetryService {
       const event = { ...usage, ...group }; const eventCost = usageCost(event, rates); if (eventCost === null) priced = false; else cost += eventCost;
       const day = days[group.day] ??= { tokens: 0, cost: 0 }; day.tokens += newTokens(event); day.cost = eventCost === null || day.cost === null ? null : day.cost + eventCost; for (const key of ['input', 'output', 'cached', 'cacheWrite'] as const) usage[key] += group[key]; }
     // Claude's transcript has the tokens in context but not the window; a running Claude reports that elsewhere.
-    const window = this.windows.get(runId); if (usage.context && usage.context.limit === 0 && window) usage.context = { ...usage.context, limit: window };
+    const window = this.windows.get(runId); const used = this.inUse.get(runId);
+    if (used !== undefined && window) usage.context = { used, limit: window };
+    else if (usage.context && usage.context.limit === 0 && window) usage.context = { ...usage.context, limit: window };
     usage.cost = priced ? cost : null; usage.source = usage.engine === 'claude' ? 'claude-session-jsonl' : usage.engine === 'gemini' ? 'cli-logs' : 'codex-rollout-jsonl'; usage.confidence = 'reported'; usage.costBasis = priced ? 'configured-model-rates' : 'unpriced'; usage.eventCount = totals.events; usage.days = days; return usage;
   }
   list(): UsageRecord[] { const rates = this.safeRates(); return this.database.prepare('SELECT run FROM metadata ORDER BY rowid DESC LIMIT 2000').all().map((r) => this.runUsage(String(r.run), rates)).filter((r): r is UsageRecord => r !== null); }

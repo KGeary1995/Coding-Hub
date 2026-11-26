@@ -39,6 +39,12 @@ export type HubRequest =
   | { action: 'synced-projects' }
   | { action: 'device-sync-resolve'; document: SyncedDocument; keep: 'local' | 'remote' }
   | { action: 'drive-sync'; project: string };
+/**
+ * What Trace asks an agent near the end of its context (src/runtime/auto-handoff.ts; a Round Table seat's from the host,
+ * 1.47). `server`: the memory tools' server as that agent sees it (Gemini's come from Trace's agy plugin, named otherwise).
+ * `seated`: a seat is asked while its table rests, so it is told to do nothing more (no work to carry on, and no one sees its reply).
+ */
+export const handoffRequest = (percent: number, server = 'coding-hub-memory', seated = false) => `Trace: this conversation has used ${percent}% of its context window. Before anything else, save a handoff with the write_handoff tool (${server}): the decisions made, the files changed, the checks run, what is left to do and any blockers. ${seated ? 'Then reply only that it is saved and change nothing: this turn is between you and Trace, and the Round Table goes on with the person\'s next message.' : 'Then carry on with what you were doing.'}`;
 export interface MemoryNote { id: string; project: string; title: string; content: string; author: CLIEngine | 'human'; createdAt: string; supersedes?: string }
 export interface MemoryConflict { id: string; local: MemoryNote; remote: MemoryNote; localHash: string; remoteHash: string }
 /** `machine` names the other computer a record was synced from; it is absent for this computer's own runs. */

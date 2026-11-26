@@ -11,7 +11,7 @@ export const MAX_FRAME_BYTES = 16 * 1024 * 1024;
 export const Kind = {
   /** Trace → runner: `{ version, secret }`. The newest connection that says hello takes over; the older is closed. */
   hello: 1,
-  /** Runner → Trace: `{ version, pid, draining }`, the answer to hello. */
+  /** Runner → Trace: `{ version, pid, draining, home?, pipes? }`, the answer to hello. `pipes`: it runs chats too (pipe runs, 1.47.0). */
   welcome: 2,
   /** Trace → runner: `{ id, file, args, cwd, env, cols, rows }`. The runner answers spawned or failed. */
   spawn: 3,
@@ -41,14 +41,20 @@ export const Kind = {
    * waits to write; nothing is lost. Every paused terminal is resumed when Trace disconnects. */
   pause: 16,
   resume: 17,
+  /** Trace → runner (empty), answered with a pipe run's journal (journal.ts, binary). Added in 1.47.0 without a new
+   * protocol: a runner that has them says `pipes` in its welcome, and Trace sends chats only to one that does. */
+  journal: 18,
+  /** Runner → Trace: what a pipe run wrote to stderr (raw bytes), kept apart from its stdout. */
+  stderr: 19,
 } as const;
 export type FrameKind = typeof Kind[keyof typeof Kind];
 
 export interface Frame { kind: number; term: number; payload: Buffer }
 /** `meta`: the channel's details from Trace, kept by the runner without reading them and given back in the list, so a
  * Trace that opens again knows which channel each terminal is. */
-export interface RunnerTerminal { term: number; id: string; pid: number; cols: number; rows: number; exitCode?: number; meta?: unknown }
-export interface SpawnRequest { id: string; file: string; args: string[]; cwd: string; env: Record<string, string>; cols: number; rows: number; meta?: unknown }
+export interface RunnerTerminal { term: number; id: string; pid: number; cols: number; rows: number; exitCode?: number; meta?: unknown; pipe?: true }
+/** `pipe`: a chat run, a child with plain pipes instead of a terminal; the runner keeps its journal, and its tail is the stderr. */
+export interface SpawnRequest { id: string; file: string; args: string[]; cwd: string; env: Record<string, string>; cols: number; rows: number; meta?: unknown; pipe?: boolean }
 
 export function encode(kind: FrameKind, term: number, payload: Buffer | string | object = Buffer.alloc(0)): Buffer {
   const body = Buffer.isBuffer(payload) ? payload : Buffer.from(typeof payload === 'string' ? payload : JSON.stringify(payload));

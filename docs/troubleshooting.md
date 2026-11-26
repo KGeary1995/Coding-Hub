@@ -105,6 +105,10 @@ Before 1.11.3, Trace recorded no context for Claude, because Claude Code's trans
 
 With **Keep channels running after Trace quits** on (1.36.0), terminal channels run in Trace's background runner. If they did not come back, `~/.coding-hub/runner/runner.log` says when the runner started (with its process ID) and any fault it had. A channel that ended while Trace was closed comes back stopped, as after any quit. The runner shows in Task Manager as **Trace Runner** (on Windows), and its programs run under it. Ending it ends every channel it holds; it also ends by itself a minute after its last channel stops with Trace closed. If Trace cannot start the runner, channels run inside Trace instead, as before 1.36.0, and stop when it quits.
 
+### Windows terminals: trying the ConPTY that ships with node-pty (experimental)
+
+`CODING_HUB_CONPTY_DLL=1` makes Windows terminal channels use the ConPTY node-pty ships (`conpty.dll` and `OpenConsole.exe`, version 1.23) instead of the one built into Windows, in case it handles input or emoji widths better. It is untested and off by default: an earlier quick try hung. To try it, quit Trace with **Stop all channels and quit** (a runner already running keeps the setting it started with), set the variable for your user (`setx CODING_HUB_CONPTY_DLL 1`, then sign out and in, or start Trace from a terminal where it is set), and open Trace. Check that a channel starts, takes typing and Ctrl+C, resizes, and ends both by itself and with **Stop**. A channel that never shows as ended after its program exits is the hang to report. To undo, `setx CODING_HUB_CONPTY_DLL ""` (any value but `1` is off), sign out and in, and stop all channels and quit again. How it differs: [docs/background-runner.md](background-runner.md), section 4.
+
 ### A channel shows Failed with "The terminal process could not start"
 
 The message names the cause. From source, run `npm run rebuild:native`, because node-pty must match Electron's ABI. Also check that the CLI starts in a normal terminal.

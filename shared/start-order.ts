@@ -16,6 +16,13 @@ export interface StartStep {
   /** How long to wait for it before stopping the sequence. */
   waitSeconds?: number;
 }
+/**
+ * What the screen check (electron/services/cli/screen-state.ts) says while Codex asks its startup questions: trust this
+ * folder, and review a new or changed hook (codex-cli 0.172). Text typed then is not a request, and a key in it can
+ * answer the question ("t" trusts every hook).
+ */
+export const CODEX_TRUST_QUESTION = 'Codex asks whether to trust this folder'; export const CODEX_HOOK_QUESTION = 'Codex asks you to review a hook before it runs';
+export const STARTUP_QUESTIONS: readonly string[] = [CODEX_TRUST_QUESTION, CODEX_HOOK_QUESTION];
 export const MAX_STEP = 8; export const MAX_COMMAND = 1000; export const MAX_WAIT_TEXT = 200; export const DEFAULT_WAIT_SECONDS = 120; export const MAX_WAIT_SECONDS = 1800;
 
 /** The channels with a step, in the order they start: by step, then as their tiles are laid out. */

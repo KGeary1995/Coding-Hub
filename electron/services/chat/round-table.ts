@@ -15,6 +15,8 @@ export interface TableHost {
   setReadOnly(runId: string, readOnly: boolean): void;
   answer(runId: string, requestId: string, allow: boolean): void;
   interrupt(runId: string): void;
+  /** Compacts the run's conversation as a turn of its own (its `done` ends it); false when its agent cannot from Trace. */
+  compact?(runId: string): boolean;
   emit(owner: number, envelope: ChatEnvelope): void;
   /** The files in a folder now, as a hash (repositoryState); null outside Git. Findings record it. */
   stateOf?(cwd: string): Promise<string | null>;
@@ -80,7 +82,9 @@ interface Seat { runId: string; sessionId: string; engine: Engine; agentName?: s
   /** Seated after the table opened (setSeats): its first brief carries the latest messages, word for word. */
   newcomer?: boolean;
   /** Still in a turn from before this table opened: its `done` ends that old turn and is never taken as an answer. */
-  stale?: boolean }
+  stale?: boolean;
+  /** In a turn Trace gave it alone (`aside`: its handoff, or compacting): its `done` frees it and is never an answer. */
+  aside?: boolean }
 interface Table {
   /** Every seat, the lead first; `driver` is the one that edits files. */
   owner: number; lead: Seat; seats: Seat[]; driver: Seat; rounds: number; round: number;
@@ -259,6 +263,26 @@ export class RoundTables {
     this.publish(table);
   }
 
+  /**
+   * A turn for one seat alone, while the table rests (from 1.47): the automatic handoff's request (`text`), or (null)
+   * compacting its conversation once that handoff is saved. Nothing goes to the other seats, its reply is no answer and
+   * is not read into the record, and no round starts; the person's message meanwhile waits, as while the seats work.
+   *
+   * The window decides when (src/runtime/auto-handoff.ts): it has every run's usage and the project's memory, as it does
+   * for a channel's handoff. The table only lends the turn, since only it knows whether its seats are free, and a message
+   * sent to a seat past it would end as that seat's answer.
+   */
+  aside(leadRunId: string, seatRunId: string, text: string | null) {
+    const table = this.leading(leadRunId); const seat = table.seats.find((each) => each.runId === seatRunId);
+    if (!seat) throw new HubError('TABLE_SEAT', 'That chat does not sit at this Round Table.');
+    if (this.busy(table) || table.reviewing || table.phase !== 'idle' || table.queued) throw new HubError('TABLE_BUSY', 'The Round Table is at work: Trace asks for the handoff once its agents have finished.');
+    seat.busy = true; seat.aside = true; seat.text = '';
+    if (text === null) {
+      if (!this.host.compact?.(seat.runId)) { seat.busy = false; seat.aside = false; throw new HubError('COMPACT_UNAVAILABLE', `${this.nameOf(table, seat)} cannot compact its conversation from Trace.`); }
+      this.notice(table, `${this.nameOf(table, seat)}'s handoff is saved in shared memory, so Trace compacts its conversation.`);
+    } else { this.notice(table, `${this.nameOf(table, seat)}'s context is nearly full, so Trace asked it alone to save a handoff.`); this.host.send(seat.runId, text, []); }
+  }
+
   /** A message kept from before a restart: sent now (to every seat, once they are free), or dropped. */
   waiting(leadRunId: string, send: boolean) {
     const table = this.leading(leadRunId); if (!table.queued) return this.state(table);
@@ -342,9 +366,10 @@ export class RoundTables {
    */
   observe(envelope: ChatEnvelope): string | null {
     const { runId, event } = envelope;
-    this.remember(runId, event);
-    const table = this.tableOf(runId); if (!table) return null;
-    const seat = table.seats.find((each) => each.runId === runId)!;
+    const table = this.tableOf(runId); const seat = table?.seats.find((each) => each.runId === runId);
+    // A turn aside (a handoff) is not part of the conversation a newcomer is briefed from.
+    if (!seat?.aside) this.remember(runId, event);
+    if (!table || !seat) return null;
     if (event.type === 'assistant') { const words = event.blocks.filter((block) => block.type === 'text').map((block) => (block as { text: string }).text).join('\n'); if (words) seat.text = seat.text ? `${seat.text}\n${words}` : words; return null; }
     if (event.type === 'permission' && !this.edits(table, seat) && isEdit(event)) {
       this.host.answer(runId, event.requestId, false);
@@ -353,9 +378,9 @@ export class RoundTables {
     }
     if (event.type === 'permission' && !this.edits(table, seat) && allowAtFull(this.host, runId, event.requestId)) return '';
     if (event.type !== 'done' || !seat.busy) return null;
-    // The end of a turn from before this table opened: the seat is free, and a message waiting for it goes now.
-    if (seat.stale) {
-      seat.busy = false; seat.stale = false; seat.text = '';
+    // The end of a turn from before this table opened, or of one aside: the seat is free, and a message waiting for it goes now.
+    if (seat.stale || seat.aside) {
+      seat.busy = false; seat.stale = false; seat.aside = false; seat.text = '';
       if (!this.busy(table) && !table.reviewing && table.queued && !table.kept) { const { text, images } = table.queued; table.queued = null; this.ask(table, text, images); }
       // The newcomer's old turn ended after the lead's summary came in: the summary goes to it now.
       else if (!this.busy(table) && table.phase === 'joining') this.settle(table, table.lead);

@@ -3,7 +3,7 @@ import { channelNumber, channelsOf, useWorkspaceStore } from '../state/workspace
 import { startSession } from './use-native-host';
 import { watchOutput, writeTerminal } from './terminals';
 import { sendToChannel } from './send-to-channel';
-import { DEFAULT_WAIT_SECONDS, outputMatcher, startOrder } from '../../shared/start-order';
+import { DEFAULT_WAIT_SECONDS, outputMatcher, startOrder, STARTUP_QUESTIONS } from '../../shared/start-order';
 import { isAgentConfig, isChatRun, type Session } from '../../shared/types';
 
 /** Where Start in order is: shown on its button while it runs, and why it stopped when it did not finish. */
@@ -13,6 +13,14 @@ export const useStartOrder = create<{ progress: StartProgress | null; notice: st
 let cancel: (() => void) | null = null;
 /** Agents' output goes quiet this long once they are ready for a message (after a trust or setup prompt is answered). */
 export const READY_QUIET_MS = 3000; export const READY_LIMIT_MS = 120_000;
+/**
+ * After a question it showed (a trust prompt) is answered, longer: Codex opens its review of a new hook a few seconds
+ * after the folder is trusted (codex-cli 0.172, the owner's AWS SessionStart hook, 2026-11-25), and a request typed in
+ * that moment was lost.
+ */
+export const READY_AFTER_QUESTION_MS = 10_000;
+/** A startup question that appears this soon after the request was typed means it was not taken: it is offered again. */
+export const LOST_REQUEST_MS = 15_000;
 
 /**
  * Sends an agent its first request once it is ready: a chat at once, a terminal once its output has gone quiet with
@@ -20,17 +28,31 @@ export const READY_QUIET_MS = 3000; export const READY_LIMIT_MS = 120_000;
  * is offered on its tile instead, sent with one press. `send` types it another way (a scheduled job sends its task). Whether it was sent.
  */
 export async function sendWhenReady(id: string, prompt: string, send: (session: Session) => Promise<boolean> = (session) => sendToChannel(session, prompt)): Promise<boolean> {
-  const runId = sessionOf(id)?.runId; let last = Date.now();
+  const runId = sessionOf(id)?.runId; let last = Date.now(); let asked = false;
+  const offer = () => { if (sessionOf(id)?.runId === runId) useWorkspaceStore.setState((state) => ({ sessions: state.sessions.map((item) => item.id === id ? { ...item, preparedRequest: { prompt, label: 'Send first request' } } : item) })); };
   const unwatch = watchOutput(id, () => { last = Date.now(); });
   try {
     for (const end = Date.now() + READY_LIMIT_MS; Date.now() < end;) {
       const session = sessionOf(id); if (session?.status !== 'running' || session.runId !== runId) return false;
-      if (isChatRun(session.config) || (!session.attention && Date.now() - last >= READY_QUIET_MS)) { if (await send(session)) return true; break; }
+      if (session.attention) asked = true;
+      if (isChatRun(session.config) || (!session.attention && Date.now() - last >= (asked ? READY_AFTER_QUESTION_MS : READY_QUIET_MS))) {
+        if (!await send(session)) break;
+        if (!isChatRun(session.config)) void offerIfLost(id, runId, offer);
+        return true;
+      }
       await new Promise((resolve) => setTimeout(resolve, 250));
     }
   } finally { unwatch(); }
-  if (sessionOf(id)?.runId === runId) useWorkspaceStore.setState((state) => ({ sessions: state.sessions.map((item) => item.id === id ? { ...item, preparedRequest: { prompt, label: 'Send first request' } } : item) }));
+  offer();
   return false;
+}
+/** A startup question shown soon after the request was typed: the CLI was not reading requests yet, so it is offered again. */
+async function offerIfLost(id: string, runId: string | null | undefined, offer: () => void) {
+  for (const end = Date.now() + LOST_REQUEST_MS; Date.now() < end;) {
+    const session = sessionOf(id); if (session?.status !== 'running' || session.runId !== runId) return;
+    if (session.attention && STARTUP_QUESTIONS.includes(session.attention.message)) { offer(); return; }
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
 }
 
 /** Start in order on its own when a workspace opens (or a template is applied): only when no channel is running yet. */

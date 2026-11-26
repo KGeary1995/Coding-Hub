@@ -3,17 +3,19 @@ import fs from 'node:fs';
 import readline from 'node:readline';
 
 /**
- * The runner's Windows job objects, through native/trace-jobs.c (docs/background-runner.md, step 5): each program is
- * put in a job when it starts, and stopping its channel ends the job, children that left its process tree included.
+ * Windows job objects, through native/trace-jobs.c (docs/background-runner.md, step 5): each program is put in a job
+ * when it starts, and stopping its channel ends the job, children that left its process tree included. The runner has
+ * one for its terminals, and Trace one for the channels it runs itself (PtyManager's `jobs`).
  * Without the helper (a source run without C++ build tools) every call does nothing and stopping falls back to
  * closing the terminal, after Trace's own process-tree stop.
  */
 export class Jobs {
   private helper: ChildProcessWithoutNullStreams | null = null; private waiting = new Map<number, ((ok: boolean) => void)[]>();
-  constructor(program: string | null, private log: (message: string) => void = () => {}) {
+  /** `args` only for tests, which run a stand-in helper under Node. */
+  constructor(program: string | null, private log: (message: string) => void = () => {}, args: string[] = []) {
     if (!program || !fs.existsSync(program)) return;
     try {
-      const helper = spawn(program, [], { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true }); this.helper = helper;
+      const helper = spawn(program, args, { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true }); this.helper = helper;
       helper.on('error', (error) => { this.log(`job helper: ${error.message}`); this.gone(); }); helper.on('exit', () => this.gone());
       helper.stdin.on('error', () => {});
       readline.createInterface({ input: helper.stdout }).on('line', (line) => {

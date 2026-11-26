@@ -102,6 +102,24 @@ describe('a Gemini CLI run’s own usage', () => {
     telemetry.close();
   });
 
+  it('takes a seat’s context from what agy reports (usage_update: in use and the window), and makes none without a window', async () => {
+    const root = home(); const { telemetry, published } = service(root);
+    telemetry.startGemini(run('r1', 's1') as never, seat as never); telemetry.setGeminiConversation('r1', ID);
+    // Reported before the first request is read: kept, and shown with the run's first record.
+    telemetry.setContextWindow('r1', 1_048_576, 14_986); expect(telemetry.runUsage('r1')).toBeNull();
+    conversation(root, ID, [row(14_746, 240, 0, day(22, 9))]); await telemetry.end('r1');
+    expect(telemetry.runUsage('r1')?.context).toEqual({ used: 14_986, limit: 1_048_576 });
+    // The next report is published at once, so the meter and the automatic handoff see it.
+    const count = published.length; telemetry.setContextWindow('r1', 1_048_576, 900_000);
+    expect(published).toHaveLength(count + 1); expect(published.at(-1)?.context).toEqual({ used: 900_000, limit: 1_048_576 });
+    // The same again is nothing new; nonsense is ignored.
+    telemetry.setContextWindow('r1', 1_048_576, 900_000); telemetry.setContextWindow('r1', 1_048_576, -1); telemetry.setContextWindow('r1', 0, 5); expect(published).toHaveLength(count + 1);
+    // Another run that never reported a window has no context, as before.
+    telemetry.startGemini(run('r2', 's2') as never, seat as never); telemetry.setGeminiConversation('r2', THIRD); conversation(root, THIRD, [row(10, 1, 0, day(22, 9))]); await telemetry.end('r2');
+    expect(telemetry.runUsage('r2')?.context).toBeNull();
+    telemetry.close();
+  });
+
   it('counts a request once while it is still growing', async () => {
     const root = home(); const { telemetry } = service(root);
     telemetry.startGemini(run('r1', 's1') as never, seat as never);
