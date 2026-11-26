@@ -7,7 +7,9 @@ import fs from 'node:fs';
 import net from 'node:net';
 import path from 'node:path';
 // Only these and node-pty are copied into the runner kit (kit.ts): nothing here may import more of Trace.
+// chat-process.ts imports only Node (and node-pty's types), so a chat starts here exactly as in Trace (1.47.0).
 import { nodePty } from '../cli/native-pty';
+import { spawnChatProcess } from '../chat/chat-process';
 import { Jobs } from './jobs';
 import { Runner } from './runner';
 
@@ -23,7 +25,8 @@ const jobs = new Jobs(process.platform === 'win32' ? path.resolve(__dirname, '..
 const server = net.createServer((socket) => runner.connect(socket));
 const runner = new Runner(secret, {
   spawn: (request) => {
-    const pty = nodePty().spawn(request.file, request.args, { name: 'xterm-256color', cwd: request.cwd, cols: request.cols, rows: request.rows, env: request.env });
+    const options = { name: 'xterm-256color', cwd: request.cwd, cols: request.cols, rows: request.rows, env: request.env };
+    const pty = request.pipe ? spawnChatProcess(request.file, request.args, options) : nodePty().spawn(request.file, request.args, options);
     void jobs.add(pty.pid); pty.onExit(() => { void jobs.drop(pty.pid); }); return pty;
   },
   // Trace's own stopProcess has already ended the program's process tree by its id; the job ends whatever left that

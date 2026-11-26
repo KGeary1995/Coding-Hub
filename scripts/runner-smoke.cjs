@@ -42,7 +42,8 @@ const text = (frame) => frame.payload.toString('utf8');
 (async () => {
   const kit = ensureKit(place, path.join(__dirname, '..'), electron); startRunner(kit, place);
   const first = await retry(connect); const welcome = JSON.parse(text(await first.next(Kind.welcome)));
-  if (path.resolve(welcome.home).toLowerCase() !== path.resolve(kit.folder).toLowerCase()) throw new Error(`The runner runs from ${welcome.home}, not its kit ${kit.folder}.`);
+  // Real paths: on a Mac the temp folder is /var/… for the smoke and /private/var/… for the runner.
+  if (fs.realpathSync(welcome.home).toLowerCase() !== fs.realpathSync(kit.folder).toLowerCase()) throw new Error(`The runner runs from ${welcome.home}, not its kit ${kit.folder}.`);
   const runner = { pid: welcome.pid };
   console.log(`the runner runs from its kit (${path.relative(root, kit.folder)})`);
   // A program that writes a line every 300 ms, for about 6 seconds, then waits for input.
@@ -80,6 +81,18 @@ const text = (frame) => frame.payload.toString('utf8');
     second.send(Kind.forget, started.term);
     console.log('stopping a channel ended a child that had left its process tree (job object)');
   }
+
+  // A chat (1.47.0): a real child with pipes. Its input and output are kept in order in its journal, its stderr apart.
+  const echo = "process.stdin.setEncoding('utf8');process.stderr.write('ready\\n');let n=0;process.stdin.on('data',(d)=>{for(const line of d.split('\\n').filter(Boolean)){if(line==='bye')process.exit(5);process.stdout.write(JSON.stringify({n:++n,echo:line})+'\\n');}})";
+  second.send(Kind.spawn, 0, { id: 'smoke-chat', file: process.execPath, args: ['-e', echo], cwd: root, env: { PATH: process.env.PATH ?? '', SystemRoot: process.env.SystemRoot ?? '' }, cols: 80, rows: 24, pipe: true });
+  const chat = JSON.parse(text(await second.next(Kind.spawned)));
+  if (text(await second.next(Kind.stderr)) !== 'ready\n') throw new Error('The chat\'s stderr did not come back apart.');
+  second.send(Kind.input, chat.term, 'one\ntwo\n');
+  for (let i = 0; i < 50; i++) { second.send(Kind.journal, chat.term); const frame = await second.next(Kind.journal); const body = frame.payload; if (body.length > 1 && body.includes(Buffer.from('"n":2'))) { if (body[0] !== 0 || body[1] !== 0 || !body.includes(Buffer.from('one\ntwo\n'))) throw new Error('The chat\'s journal is not in order.'); break; } if (i === 49) throw new Error('The chat\'s journal never held its answer.'); await new Promise((wake) => setTimeout(wake, 100)); }
+  second.send(Kind.input, chat.term, 'bye\n');
+  const chatEnded = JSON.parse(text(await second.next(Kind.exited, () => true, 20000))); if (chatEnded.exitCode !== 5) throw new Error(`The chat exited with ${chatEnded.exitCode}`);
+  second.send(Kind.forget, chat.term);
+  console.log('a chat ran with pipes: its journal kept both directions in order, and its stderr came back apart');
 
   // Nothing left to run: once Trace leaves too, the runner goes (idle after 60 s; the smoke forgets and waits).
   second.send(Kind.forget, term); second.socket.destroy();

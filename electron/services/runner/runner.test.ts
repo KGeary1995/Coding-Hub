@@ -9,7 +9,7 @@ import { Tail } from './tail';
 
 class FakePty implements RunnerPty {
   pause?: () => void; resume?: () => void;
-  pid = 4242; written: string[] = []; size: [number, number] | null = null; killed = false;
+  pid = 4242; written: string[] = []; size: [number, number] | null = null; killed = false; calls: string[] = [];
   private data: ((data: string) => void)[] = []; private exit: ((event: { exitCode: number }) => void)[] = [];
   onData(listener: (data: string) => void) { this.data.push(listener); }
   onExit(listener: (event: { exitCode: number }) => void) { this.exit.push(listener); }
@@ -176,6 +176,18 @@ describe('Runner', () => {
     trace.socket.destroy(); await trace.gone(); await new Promise((resolve) => setTimeout(resolve, 250)); expect(exits()).toBe(1);
   });
 
+  it('runs a chat with pipes: says it can, never sends it Ctrl+C, and pauses it for a slow Trace instead of skipping its output', async () => {
+    const { connect, ptys } = await start({ sendLimit: 1 }); const trace = await connect(); expect(body<{ pipes?: boolean }>(await trace.next(Kind.welcome)).pipes).toBe(true);
+    trace.send(Kind.spawn, 0, { ...spawnRequest('chat-1'), pipe: true }); const { term } = body<{ term: number }>(await trace.next(Kind.spawned));
+    ptys[0].pause = () => ptys[0].calls.push('pause'); ptys[0].resume = () => ptys[0].calls.push('resume');
+    trace.send(Kind.signal, term, { signal: 'interrupt' }); trace.send(Kind.input, term, '{"type":"user"}\n'); await until(() => ptys[0].written.length === 1);
+    expect(ptys[0].written).toEqual(['{"type":"user"}\n']);
+    ptys[0].emit('x'.repeat(64 * 1024));
+    const output = await trace.next(Kind.output); expect(output.payload.length).toBe(64 * 1024);
+    expect(trace.frames.some((frame) => frame.kind === Kind.skipped)).toBe(false);
+    await until(() => ptys[0].calls.includes('resume')); expect(ptys[0].calls).toEqual(['pause', 'resume']);
+    trace.send(Kind.journal, term); const journal = await trace.next(Kind.journal); expect(journal.payload.readUInt8(0)).toBe(0);
+  });
   it('keeps reading a terminal Trace cannot keep up with, and says so', async () => {
     const { connect, ptys } = await start({ sendLimit: 0 }); const trace = await connect(); await trace.next(Kind.welcome);
     trace.send(Kind.spawn, 0, spawnRequest('run-1')); const { term } = body<{ term: number }>(await trace.next(Kind.spawned));

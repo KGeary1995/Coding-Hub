@@ -8,7 +8,9 @@ import { Runner, type RunnerPty as HeldPty } from './runner';
 
 class FakePty implements HeldPty {
   pid = 777; written: string[] = []; size: [number, number] | null = null; calls: string[] = [];
-  private data: ((data: string) => void)[] = []; private exit: ((event: { exitCode: number }) => void)[] = [];
+  private data: ((data: string) => void)[] = []; private exit: ((event: { exitCode: number }) => void)[] = []; private errors: ((data: string) => void)[] = [];
+  onStderr(listener: (data: string) => void) { this.errors.push(listener); }
+  complain(text: string) { for (const listener of this.errors) listener(text); }
   onData(listener: (data: string) => void) { this.data.push(listener); }
   onExit(listener: (event: { exitCode: number }) => void) { this.exit.push(listener); }
   write(data: string) { this.written.push(data); }
@@ -86,4 +88,21 @@ describe('RunnerClient', () => {
     let exit: number | null = null; pty.onExit(({ exitCode }) => { exit = exitCode; }); let lost = false; trace.onLost = () => { lost = true; };
     dropAll(); await until(() => lost); expect(exit).toBe(1); expect(trace.connected).toBe(false);
   });
+  it('runs a chat with pipes: its journal comes back in order, kept while Trace was away, and its stderr apart', async () => {
+    const { ptys, client } = await start(); const trace = await client(); expect(trace.pipes).toBe(true);
+    const chat = await trace.spawn({ ...request('chat-1'), pipe: true }); const errors: string[] = []; chat.onStderr((text) => errors.push(text));
+    chat.write('{"type":"user"}\n'); await until(() => ptys[0].written.length === 1);
+    ptys[0].emit('{"type":"assi'); ptys[0].emit('stant"}\n'); ptys[0].complain('a warning');
+    await until(() => errors.length === 1); expect(errors).toEqual(['a warning']);
+    trace.close();
+    // While no Trace is connected the chat goes on; a Trace that comes back reads all of it from the journal.
+    ptys[0].emit('{"type":"result"}\n');
+    const back = await client(); const [listed] = await back.list(); expect(listed).toMatchObject({ id: 'chat-1', pipe: true });
+    const journal = await back.journal(listed.term);
+    expect(journal?.overflowed).toBe(false);
+    expect(journal?.entries.map((entry) => [entry.dir, entry.data.toString()])).toEqual([['in', '{"type":"user"}\n'], ['out', '{"type":"assistant"}\n{"type":"result"}\n']]);
+    // A terminal has no journal.
+    await back.spawn(request('term-1')); const terminals = await back.list(); expect(await back.journal(terminals[1].term)).toBeNull();
+  });
 });
+
