@@ -86,6 +86,15 @@ describe('All projects (the project menu)', () => {
   });
 });
 
+describe('which channels show, settled when a project opens', () => {
+  it('is not settled for the project opened before, when another opens before it settles', async () => {
+    const a = channel('a', { mode: 'independent', cwd: '/a' }); const b = channel('b', { mode: 'independent', cwd: '/b' });
+    useWorktrees.setState({ list: [], loaded: true }); useWorkspaceStore.setState({ rootDirectory: '/b', sessions: [a, b], focusedSessionId: 'a' });
+    useShownChannels.setState({ settled: null }); setAllProjects(true); openProject('/a'); await Promise.resolve();
+    expect(shownChannels([a, b], '/a', []).map((item) => item.id)).toEqual(['a']);
+  });
+});
+
 describe('the shown channels’ tiles while another project’s are hidden', () => {
   const tile = (sessionId: string, x: number, y: number, w = 6, h = 12) => ({ sessionId, x, y, w, h, minW: 3, minH: 10 });
   const shown = [channel('a'), channel('b')];

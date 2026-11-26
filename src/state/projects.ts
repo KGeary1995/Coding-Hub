@@ -64,7 +64,7 @@ useWorkspaceStore.subscribe((state, previous) => { if (state.rootDirectory !== p
 export function shownChannels(channels: Session[], rootDirectory: string | null, worktrees: readonly ManagedWorktree[]): Session[] {
   const settled = useShownChannels.getState().settled;
   // Settled once the worktrees are known (a worktree's channel belongs to its repository's project), not before.
-  if (!settled) { const shown = channels.filter((session) => inActiveProject(session, rootDirectory, worktrees)); if (useWorktrees.getState().loaded) queueMicrotask(() => useShownChannels.setState({ settled: { known: channels.map((session) => session.id), shown: shown.map((session) => session.id) } })); return shown; }
+  if (!settled) { const shown = channels.filter((session) => inActiveProject(session, rootDirectory, worktrees)); if (useWorktrees.getState().loaded) queueMicrotask(() => { /* Not for a project opened since (or settled since). */ if (useShownChannels.getState().settled || useWorkspaceStore.getState().rootDirectory !== rootDirectory) return; useShownChannels.setState({ settled: { known: channels.map((session) => session.id), shown: shown.map((session) => session.id) } }); }); return shown; }
   return channels.filter((session) => !settled.known.includes(session.id) || settled.shown.includes(session.id));
 }
 /**
