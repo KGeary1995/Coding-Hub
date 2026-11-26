@@ -7,6 +7,8 @@ import { ClaudeProfiles } from '../cli/claude-profiles';
 import { NativeSessions, SEARCH_LIMITS } from './native-sessions';
 import type { NativeSearch } from '../../../shared/workbench';
 import { writeGeminiConversation } from '../chat/gemini-conversation.fixture';
+/** Real SQLite files written and read in each test: 0.5-1 s on the Windows runner, once 14 s (a nightly), over the 5 s default. */
+vi.setConfig({ testTimeout: 60_000 });
 
 const roots: string[] = [];
 afterEach(() => { vi.unstubAllEnvs(); roots.splice(0).forEach((root) => fs.rmSync(root, { recursive: true, force: true })); });
