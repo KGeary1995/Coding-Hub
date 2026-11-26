@@ -48,7 +48,8 @@ export function DeviceSyncCard() {
   const outside = outsideSyncFolder(linked, status);
   return <article className="storage-card ui-card settings-card device-sync" aria-labelledby="device-sync-title">
     {head(!status.enabled ? 'Off' : status.connected ? 'On' : 'Drive folder unavailable', status.enabled && status.connected ? 'saved success' : status.enabled ? 'warning' : 'neutral')}
-    <p>Settings, shared rules, project templates, custom agents and usage history follow you through the Drive folder above. Running channels, recorded output and the project list stay on each computer.</p>
+    <p>Settings, rules, templates, custom agents and usage follow you through the Drive folder above.</p>
+    <p className="ui-hint">Running channels, recorded output and the project list stay on each computer.</p>
     {status.enabled && <>
       <dl className="settings-facts">
         <dt>This computer</dt><dd>{status.machine.name}</dd>
@@ -74,7 +75,7 @@ export function DeviceSyncCard() {
       {status.error && <p role="alert" className="ui-banner danger"><CircleAlert aria-hidden="true" /><span>{status.error}</span></p>}
       <div className="ui-actions"><button className="button secondary" disabled={busy} onClick={() => void run({ action: 'device-sync-now' })}><RefreshCw size={14} />Sync now</button></div>
     </>}
-    {!status.enabled && <p className="ui-hint">Turn on “Sync settings, rules, templates and usage between computers” above and save. Do the same on each computer, with the same Drive folder.</p>}
+    {!status.enabled && <p className="ui-hint">Turn on sync between computers above, with the same Drive folder on each computer.</p>}
     {error && <p role="alert" className="ui-banner danger"><CircleAlert aria-hidden="true" /><span>{error}</span></p>}
   </article>;
 }

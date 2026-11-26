@@ -3,6 +3,7 @@ import { Play, Trash2, Webhook } from 'lucide-react';
 import type { EventHookData, EventHookEvent } from '../../shared/workbench';
 import { workbench } from '../runtime/workbench';
 import { ConfirmStep } from './ConfirmStep';
+import { HowThisWorks } from './HowThisWorks';
 
 const EVENTS: Record<EventHookEvent, string> = { 'needs-you': 'A channel needs you', 'turn-ended': 'A channel ends its turn', failed: 'A channel fails' };
 
@@ -18,7 +19,9 @@ export function EventHooksCard() {
   const act = async (request: Parameters<typeof workbench>[0], after?: () => void) => { setBusy(true); setError(''); try { await workbench(request); after?.(); await refresh(); } catch (e) { setError((e as Error).message); } finally { setBusy(false); } };
   return <article className="storage-card ui-card settings-card event-hooks" aria-labelledby="event-hooks-title">
     <div className="ui-card-head"><Webhook aria-hidden="true" /><h3 id="event-hooks-title">Event hooks</h3><span className="ui-badge neutral">{data.hooks.length}</span></div>
-    <p>Run a program of your own when a channel needs you, ends its turn, or fails: a script that messages your phone, a sound. It runs as you, without a shell, with the channel's number, name, folder and message in <code>TRACE_CHANNEL</code>, <code>TRACE_CHANNEL_NAME</code>, <code>TRACE_FOLDER</code>, <code>TRACE_MESSAGE</code> and <code>TRACE_EVENT</code>, and is stopped after 30 seconds. One hook runs at most once every 10 seconds for a channel.</p>
+    <p>Run a program of your own when a channel needs you, ends its turn, or fails.</p>
+    <p className="ui-hint">It runs as you, without a shell, at most every 10 seconds per channel, for up to 30 seconds.</p>
+    <HowThisWorks><p>For example, a script that messages your phone, or a sound. The channel's number, name, folder and message are in <code>TRACE_CHANNEL</code>, <code>TRACE_CHANNEL_NAME</code>, <code>TRACE_FOLDER</code>, <code>TRACE_MESSAGE</code> and <code>TRACE_EVENT</code>.</p></HowThisWorks>
     {error && <p className="error-message" role="alert">{error}</p>}
     {data.hooks.length > 0 && <ul className="ui-list">{data.hooks.map((hook) => <li className="ui-row" key={hook.id}><span className="ui-row-main"><strong>{EVENTS[hook.event]}</strong><code title={[hook.program, ...hook.args].join(' ')}>{[hook.program, ...hook.args].join(' ')}</code>{hook.lastRun && <small className={hook.lastRun.ok ? 'ui-hint' : 'error-message'}>{hook.lastRun.note} · {new Date(hook.lastRun.at).toLocaleString()}</small>}</span>
       <button type="button" className="quiet-button small" disabled={busy} onClick={() => void act({ action: 'hook-test', id: hook.id })}><Play size={12} aria-hidden="true" />Test</button>
