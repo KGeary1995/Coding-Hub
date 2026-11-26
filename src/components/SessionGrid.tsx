@@ -1,14 +1,22 @@
 import { useShallow } from 'zustand/react/shallow';
-import { useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import GridLayout from 'react-grid-layout';
-import { channelsOf, useWorkspaceStore } from '../state/workspace-store';
+import { arrangeTiles, channelsOf, useWorkspaceStore } from '../state/workspace-store';
+import { mergeTiles, refreshWorktrees, shownChannels, useAllProjects, useShownChannels, useWorktrees } from '../state/projects';
 import { SessionTile } from './SessionTile';
 import { ErrorBoundary } from './ErrorBoundary';
 
 export function SessionGrid() {
-  const { sessions: all, tiles, setTiles, focusedSessionId, layoutMode } = useWorkspaceStore(useShallow((s) => ({ sessions: s.sessions, tiles: s.tiles, setTiles: s.setTiles, focusedSessionId: s.focusedSessionId, layoutMode: s.layoutMode })));
+  const { sessions: all, tiles, setTiles, focusedSessionId, layoutMode, rootDirectory } = useWorkspaceStore(useShallow((s) => ({ sessions: s.sessions, tiles: s.tiles, setTiles: s.setTiles, focusedSessionId: s.focusedSessionId, layoutMode: s.layoutMode, rootDirectory: s.rootDirectory })));
   // A Round Table's partner runs in the background: its lead's tile shows the table.
-  const sessions = useMemo(() => channelsOf(all), [all]);
+  const channels = useMemo(() => channelsOf(all), [all]);
+  // Only the active project's channels (several projects, step 6); the others keep running and their numbers.
+  const worktrees = useWorktrees((state) => state.list);
+  useEffect(() => { void refreshWorktrees(); }, [channels.length]);
+  const allShown = useAllProjects((state) => state.on);
+  const settled = useShownChannels((state) => state.settled);
+  const sessions = useMemo(() => allShown ? channels : shownChannels(channels, rootDirectory, worktrees), [allShown, channels, rootDirectory, worktrees, settled]);
+  const filtered = sessions.length !== channels.length;
   const container = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(0);
   const [height, setHeight] = useState(0);
@@ -21,16 +29,18 @@ export function SessionGrid() {
     observer.observe(element);
     return () => observer.disconnect();
   }, []);
-  const layout = useMemo(() => tiles.map(({ sessionId, ...tile }) => ({ i: sessionId, ...tile })), [tiles]);
+  // With some hidden, the shown ones are laid out afresh (their saved places would leave gaps); the hidden ones go below them.
+  const layout = useMemo(() => (filtered ? arrangeTiles(sessions, layoutMode) : tiles).map(({ sessionId, ...tile }) => ({ i: sessionId, ...tile })), [filtered, sessions, layoutMode, tiles]);
   // A standard tile spans twelve grid rows. Fit the selected arrangement to the
   // canvas; user-resized tiles can extend it and remain reachable by scrolling.
   const bands = layoutMode === 'rows' ? sessions.length : layoutMode === 'grid' ? (sessions.length > 2 ? 2 : 1) : Math.ceil(sessions.length / 4);
   const gridRows = bands * 12;
   const rowHeight = Math.max(14, Math.floor((height - (gridRows - 1) * 8) / gridRows));
-  const focusedIndex = sessions.findIndex((session) => session.id === focusedSessionId);
+  const focused = sessions.find((session) => session.id === focusedSessionId); const focusedIndex = focused ? channels.indexOf(focused) : -1;
   return (
     <div ref={container} className="session-grid-container">
-    {focusedIndex >= 0 ? <div className="focused-session"><ErrorBoundary label={`Channel ${focusedIndex + 1}`}><SessionTile session={sessions[focusedIndex]} index={focusedIndex} /></ErrorBoundary></div> : width > 0 && <GridLayout
+    {sessions.length === 0 && channels.length > 0 ? <div className="project-empty ui-card" role="status"><strong>No channels in this project yet</strong><p className="ui-hint">Add one with <b>+ Channel</b>. The other projects' {channels.length === 1 ? 'channel keeps' : `${channels.length} channels keep`} running: the project menu at the top left opens their project.</p></div>
+    : focusedIndex >= 0 ? <div className="focused-session"><ErrorBoundary label={`Channel ${focusedIndex + 1}`}><SessionTile session={focused!} index={focusedIndex} /></ErrorBoundary></div> : width > 0 && <GridLayout
       className="session-grid"
       width={width}
       cols={12}
@@ -42,9 +52,9 @@ export function SessionGrid() {
       draggableCancel="button,input,select,.terminal-viewport"
       compactType="vertical"
       resizeHandles={['se']}
-      onLayoutChange={(next) => setTiles(next.map(({ i, x, y, w, h, minW, minH }) => ({ sessionId: i, x, y, w, h, minW: minW ?? 3, minH: minH ?? 10 })))}
+      onLayoutChange={(next) => { const moved = next.map(({ i, x, y, w, h, minW, minH }) => ({ sessionId: i, x, y, w, h, minW: minW ?? 3, minH: minH ?? 10 })); setTiles(filtered ? mergeTiles(tiles, moved) : moved); }}
     >
-      {sessions.map((session, index) => <div key={session.id}><ErrorBoundary label={`Channel ${index + 1}`}><SessionTile session={session} index={index} /></ErrorBoundary></div>)}
+      {sessions.map((session) => { const index = channels.indexOf(session); return <div key={session.id}><ErrorBoundary label={`Channel ${index + 1}`}><SessionTile session={session} index={index} /></ErrorBoundary></div>; })}
     </GridLayout>}
     </div>
   );

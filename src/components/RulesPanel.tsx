@@ -5,6 +5,7 @@ import { Check, CircleAlert, Clock, FileText, FolderCheck, FolderOpen, RefreshCw
 import type { DeviceSyncStatus, RulesTarget, SharedRules } from '../../shared/hub';
 import { useWorkspaceStore } from '../state/workspace-store';
 import { hubCall } from '../state/hub-store';
+import { channelDirectory } from '../state/channel-names';
 
 const EXAMPLE = 'Preserve public APIs unless I explicitly request a breaking change.\nInspect existing code before adding a dependency.\nRun relevant tests after meaningful changes; report checks you could not run.\nDo not commit, push, deploy, or modify credentials unless I ask.\nBefore finishing, save a handoff with decisions, changed files, validation, and remaining work.';
 
@@ -25,7 +26,7 @@ export function afterForget(snapshot: SharedRules, next: SharedRules, draft: str
 
 export function RulesPanel() {
   const { rootDirectory, sessions } = useWorkspaceStore();
-  const workspaceDirectories = [...new Set([rootDirectory, ...sessions.map((s) => s.runningCwd ?? (s.binding.mode === 'independent' ? s.binding.cwd : rootDirectory))].filter((d): d is string => !!d))];
+  const workspaceDirectories = [...new Set([rootDirectory, ...sessions.map((s) => channelDirectory(s, rootDirectory))].filter((d): d is string => !!d))];
   const [snapshot, setSnapshot] = useState<SharedRules | null>(null);
   const [content, setContent] = useState('');
   const [selected, setSelected] = useState<string[]>([]);

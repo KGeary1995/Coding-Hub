@@ -7,6 +7,7 @@ import { hubCall, useHubStore } from '../state/hub-store';
 import { chatFailed, chatSent } from '../state/chat-store';
 import { submitTerminal } from './terminals';
 import { contextShare, setHandoffPhase } from '../state/handoff-store';
+import { channelDirectory } from '../state/channel-names';
 
 /**
  * Near the end of its context an agent is asked, by Trace, to save a handoff itself (the person's choice, 2026-11-22:
@@ -47,7 +48,7 @@ async function compactAfterHandoff(session: Session, sessions: Session[]): Promi
   const runId = session.runId!; const pending = waiting.get(runId); if (!pending) return false;
   if (++pending.turns > 3) { waiting.delete(runId); setHandoffPhase(session.id, runId, 'not-saved'); return false; }
   if (!isChatEngineConfig(session.config) || session.attention || session.status !== 'running' || session.roundTable || leadOf(sessions, session.id)) return false;
-  const directory = session.runningCwd ?? (session.binding.mode === 'independent' ? session.binding.cwd : useWorkspaceStore.getState().rootDirectory); if (!directory) return false;
+  const directory = channelDirectory(session, useWorkspaceStore.getState().rootDirectory); if (!directory) return false;
   try {
     const project = session.config.memoryKey ?? await hubCall<string>({ action: 'memory-key', directory });
     if (!handoffSaved(await hubCall<MemoryNote[]>({ action: 'memory-list', project }), session.config.engine, pending.at)) return false;

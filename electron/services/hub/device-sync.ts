@@ -2,8 +2,9 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
+import { execFileSync } from 'node:child_process';
 import { z } from 'zod';
-import { DEFAULT_PREFERENCES, type DeviceSyncStatus, type HubPreferences, type SyncedComputer, type SyncedDocument, type UsageRecord } from '../../../shared/hub';
+import { DEFAULT_PREFERENCES, type DeviceSyncStatus, type HubPreferences, type SyncedComputer, type SyncedDocument, type SyncedProject, type UsageRecord } from '../../../shared/hub';
 import type { ProjectTemplate } from '../../../shared/productivity';
 import { AGENT_ID, agentDefinitionSchema, type AgentDefinition } from '../../../shared/agent-definition';
 import { HubError } from '../cli/engine-adapter';
@@ -50,6 +51,11 @@ const versionedSchema = <T extends z.ZodType>(value: T) => documentSchema(value)
 const addressDocument = documentSchema(z.object({ url: z.string().max(500).nullable() }).strict());
 /** A custom agent's definition, or null where a computer removed it (so a missing file is never read as a removal). */
 const agentDocument = documentSchema(agentDefinitionSchema.nullable());
+/** A project as another computer can use it: its GitHub repository, which it can clone (several projects; owner's choice 2026-11-25: projects sync). */
+const projectSchema = z.object({ name: z.string().min(1).max(200), repository: z.string().regex(/^[A-Za-z0-9-]{1,39}\/[A-Za-z0-9._-]{1,100}$/) }).strict();
+const projectsDocument = documentSchema(z.array(projectSchema).max(50));
+/** A GitHub remote's owner/repository (https or ssh, with or without .git); anything else is not shared. */
+export function githubRepository(remote: string): string | null { const match = /github\.com[:/]([A-Za-z0-9-]{1,39})\/([A-Za-z0-9._-]{1,100}?)(?:\.git)?\/?$/.exec(remote.trim()); return match ? `${match[1]}/${match[2]}` : null; }
 const settingsDocument = versionedSchema(settingsSchema); const rulesDocument = versionedSchema(rulesSchema); const usageDocument = documentSchema(z.array(usageSchema).max(2000));
 type Machine = z.infer<typeof machineSchema>;
 type SyncedValue = { settings: z.infer<typeof settingsSchema>; rules: z.infer<typeof rulesSchema> };
@@ -110,6 +116,7 @@ export class DeviceSync {
   private elsewhere: NonNullable<DeviceSyncStatus['elsewhere']> | null = null; private elsewhereChecked = { at: 0, folder: '' };
   private computers = new Map<string, SyncedComputer>();
   private remoteUsage = new Map<string, { mtime: number; records: UsageRecord[] }>();
+  private remoteProjects = new Map<string, { mtime: number; projects: SyncedProject[] }>(); private projectsHash = ''; private remotes = new Map<string, string | null>();
   private addresses = new Map<string, { id: string; name: string; url: string | null }>();
   /** This computer's phone remote address on the tailnet, when it has one; other computers link to it there. */
   advertise: () => string | null = () => null;
@@ -135,7 +142,7 @@ export class DeviceSync {
     const folder = path.join(drive, SYNC_FOLDER);
     // Every tick is a call on the Drive volume: the sub-folders are made once, and afterwards only looked at (lstat sees a
     // link or junction as no folder). One that went, or became a link, sends the tick through the full check below.
-    const subs = ['', 'templates', 'usage', 'computers', 'agents'];
+    const subs = ['', 'templates', 'usage', 'computers', 'agents', 'projects'];
     if (this.prepared === folder && subs.every((sub) => { try { return fs.lstatSync(path.join(folder, sub)).isDirectory(); } catch { return false; } })) return folder;
     for (const sub of subs) { const target = path.join(folder, sub); fs.mkdirSync(target, { recursive: true, mode: 0o700 }); if (fs.lstatSync(target).isSymbolicLink()) throw new HubError('SYNC_PATH', 'The sync folder must not be a link.'); }
     this.prepared = folder; return folder;
@@ -238,6 +245,37 @@ export class DeviceSync {
     }
     if (unreadable) throw new HubError('SYNC_FILE', `${unreadable} shared agent definition${unreadable === 1 ? '' : 's'} could not be read; this computer's copies were kept.`);
   }
+  /** This computer's recent projects that have a GitHub remote, each read once (git remote get-url origin). */
+  private localProjects(): { name: string; repository: string }[] {
+    const out: { name: string; repository: string }[] = [];
+    for (const directory of this.preferences().recentProjects ?? []) {
+      if (!this.remotes.has(directory)) { let remote: string | null = null; try { remote = githubRepository(execFileSync('git', ['-C', directory, 'remote', 'get-url', 'origin'], { encoding: 'utf8', timeout: 3000, windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'] })); } catch { /* No Git, no origin, or gone. */ } this.remotes.set(directory, remote); }
+      const repository = this.remotes.get(directory); if (repository && !out.some((item) => item.repository === repository)) out.push({ name: path.basename(directory) || repository, repository });
+    }
+    return out;
+  }
+  /** Each computer writes its own projects file, as with usage, so two computers never conflict over the list. */
+  private projects(folder: string) {
+    const own = path.join(folder, 'projects', this.machine.id + '.json'); const projects = this.localProjects(); const hash = digest([folder, this.machine, projects]);
+    if (hash !== this.projectsHash || !fs.existsSync(own)) { writeJson(own, { version: 1, machine: this.machine, updatedAt: new Date().toISOString(), value: projects }); this.projectsHash = hash; }
+    const directory = path.join(folder, 'projects'); const present = new Set<string>();
+    for (const name of fs.readdirSync(directory)) {
+      const match = /^([0-9a-f-]{36})\.json$/.exec(name); if (!match || match[1] === this.machine.id) continue;
+      present.add(match[1]); const file = path.join(directory, name);
+      try {
+        const mtime = fs.statSync(file).mtimeMs; if (this.remoteProjects.get(match[1])?.mtime === mtime) continue;
+        const document = readJson(file, projectsDocument); if (!document || document.machine.id !== match[1]) continue;
+        this.remoteProjects.set(match[1], { mtime, projects: document.value.map((project) => ({ ...project, machine: document.machine.name })) });
+      } catch { /* Another computer's unreadable projects file is skipped until it is rewritten. */ }
+    }
+    for (const id of this.remoteProjects.keys()) if (!present.has(id)) this.remoteProjects.delete(id);
+  }
+  /** The other computers' projects that this one has not opened (by repository), newest computer's first, each once. */
+  syncedProjects(): SyncedProject[] {
+    const here = new Set(this.localProjects().map((item) => item.repository.toLowerCase())); const out: SyncedProject[] = [];
+    for (const { projects } of this.remoteProjects.values()) for (const project of projects) if (!here.has(project.repository.toLowerCase()) && !out.some((item) => item.repository.toLowerCase() === project.repository.toLowerCase())) out.push(project);
+    return out;
+  }
   private usage(folder: string, state: State, now: boolean) {
     const own = path.join(folder, 'usage', this.machine.id + '.json');
     // Rebuilding every run's totals takes tens of milliseconds, and while an agent works they change on every tick: gather
@@ -337,7 +375,7 @@ export class DeviceSync {
     try {
       const state = this.state();
       // Each part runs even when another fails, so one unreadable file does not stop the rest from syncing.
-      for (const step of [() => this.reconcile(folder, 'settings', state), () => this.reconcile(folder, 'rules', state), () => this.templates(folder, state), () => this.syncAgents(folder, state), () => this.usage(folder, state, now), () => this.addressBook(folder), () => this.lookElsewhere(folder, now, state)]) {
+      for (const step of [() => this.reconcile(folder, 'settings', state), () => this.reconcile(folder, 'rules', state), () => this.templates(folder, state), () => this.syncAgents(folder, state), () => this.usage(folder, state, now), () => this.projects(folder), () => this.addressBook(folder), () => this.lookElsewhere(folder, now, state)]) {
         try { step(); } catch (error) { this.prepared = null; this.error ??= error instanceof HubError ? error.message : 'Part of the sync failed. It will retry.'; }
       }
       state.lastSync = new Date().toISOString(); save(this.root, 'device-sync.json', state);

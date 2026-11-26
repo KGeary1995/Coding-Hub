@@ -349,3 +349,5 @@
 [data-contrast="high"] :is(.tr-tile-topic, .tr-tile-model, .tr-detail-facts, .tr-tile-foot, .tr-scope-rate, .session-welcome p) { color: var(--tr-fg); }
 [data-contrast="high"] .tr-foot-item > svg { color: var(--tr-fg-dim); }
 [data-contrast="high"] .tr-tile .terminal-frame { border-color: var(--tr-tile-border); }
+/* A project with no channels of its own while other projects have some (several projects, step 6). */
+.project-empty { max-width: 480px; margin: 48px auto; padding: 20px 24px; text-align: center; } .project-empty p { margin: 8px 0 0; }

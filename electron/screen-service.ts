@@ -1,12 +1,13 @@
+import os from 'node:os';
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { app, clipboard, Menu, Notification, Tray } from 'electron';
-import { SCREEN_INPUT_PORT, SCREEN_SERVICE_PORT } from '../shared/screen';
+import { inputPipePath, SCREEN_INPUT_PORT, SCREEN_SERVICE_PORT } from '../shared/screen';
 import { InputRelay } from './services/remote/input-relay';
 import { ScreenCapture } from './services/remote/screen-capture';
 import { localScreenToken, ScreenService, shareElevated, shareEnabled } from './services/remote/screen-service-server';
-import { localHelper, relayHelper, WindowsInput } from './services/remote/screen-input';
+import { localHelper, pipeHelper, relayHelper, WindowsInput } from './services/remote/screen-input';
 
 /**
  * Trace started with --screen-service: shares this Windows computer's screen with linked computers, while Trace itself
@@ -72,9 +73,10 @@ else {
         const capture = await ScreenCapture.start(path.join(app.getAppPath(), 'dist', 'capture.html'), display);
         // Returned, so a paste waits for the text to be on the clipboard (writeText finishes later); a failure is swallowed.
         const write = (text: string) => Promise.resolve(clipboard.writeText(text)).catch(() => {});
-        // With the administrator option on, the input goes through that side, so it reaches apps running as administrator too.
+        // With the administrator option on, the input goes through that side, so it reaches apps running as administrator too:
+        // the protected helper's pipe (1.46), else the older relay a task set up before it, else this process's own rights.
         const key = shareElevated(root) ? localScreenToken(root) : null;
-        const input = inputLog ? testInput(inputLog) : new WindowsInput(capture.width, capture.height, write, key ? () => relayHelper(inputPort, key) : undefined, capture.region);
+        const input = inputLog ? testInput(inputLog) : new WindowsInput(capture.width, capture.height, write, key ? () => pipeHelper(inputPipePath(os.userInfo().username), () => relayHelper(inputPort, key)) : undefined, capture.region);
         return { source: capture, input, stop: () => capture.stop(), displays: capture.displays, display: capture.display };
       },
       readClipboard: async () => String(await clipboard.readText()),

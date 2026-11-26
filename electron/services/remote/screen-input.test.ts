@@ -2,7 +2,11 @@ import { describe, expect, it } from 'vitest';
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { EventEmitter } from 'node:events';
 import { PassThrough } from 'node:stream';
-import { helperArguments, keyCommand, pointerCommands, WindowsInput } from './screen-input';
+import { helperArguments, keyCommand, pipeHelper, pointerCommands, WindowsInput } from './screen-input';
+import fs from 'node:fs';
+import net from 'node:net';
+import os from 'node:os';
+import path from 'node:path';
 import { keyAction } from './keysyms';
 
 describe('input from a viewer of the Windows screen', () => {
@@ -39,4 +43,26 @@ describe('input from a viewer of the Windows screen', () => {
     const ready = await new Promise<string>((resolve) => { let out = ''; helper.stdout.on('data', (data) => { out += data; if (out.includes('ready')) resolve(out); }); helper.on('exit', () => resolve(out)); });
     helper.stdin.end(); expect(ready).toContain('ready');
   }, 30000);
+});
+
+describe('the protected helper\'s pipe (1.46)', () => {
+  // A Unix socket here stands in for Windows' named pipe: Node connects to both the same way.
+  const place = () => { const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pipe-')); return { dir, pipe: process.platform === 'win32' ? `\\\\.\\pipe\\trace-input-test-${process.pid}` : path.join(dir, 'p.sock') }; };
+  it('sends the lines written while it connects, in order, and reports the end of the connection as an exit', async () => {
+    const { dir, pipe } = place(); let got = ''; const server = net.createServer((socket) => { socket.on('data', (data) => { got += data.toString(); }); socket.on('end', () => socket.end()); });
+    await new Promise<void>((resolve) => server.listen(pipe, resolve));
+    const fallback = { pressed: [] as string[] }; let exited = false;
+    const helper = pipeHelper(pipe, () => { throw new Error('the fallback is not used while the pipe answers'); });
+    helper.on('exit', () => { exited = true; }); helper.stdin.write('k 13 1 0\n'); helper.stdin.write('k 13 0 0\n');
+    await new Promise((resolve) => setTimeout(resolve, 200)); helper.stdin.end(); await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(got).toBe('k 13 1 0\nk 13 0 0\n'); expect(exited).toBe(true); expect(fallback.pressed).toEqual([]);
+    await new Promise<void>((resolve) => server.close(() => resolve())); fs.rmSync(dir, { recursive: true, force: true });
+  });
+  it('presses through the fallback when no helper listens', async () => {
+    const { dir, pipe } = place(); const written: string[] = [];
+    const fake = Object.assign(new EventEmitter(), { stdin: Object.assign(new PassThrough(), { write: (line: string) => { written.push(line); return true; } }), stdout: new PassThrough(), stderr: new PassThrough() });
+    const helper = pipeHelper(pipe, () => fake as never); helper.stdin.write('c 65 1\n');
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(written).toEqual(['c 65 1\n']); fs.rmSync(dir, { recursive: true, force: true });
+  });
 });

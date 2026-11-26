@@ -6,7 +6,8 @@ import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { PassThrough } from 'node:stream';
-import { InputRelay, trackHeld } from './input-relay';
+import { COMMAND, InputRelay, trackHeld } from './input-relay';
+import { spawnSync } from 'node:child_process';
 import { pointerCommands, relayHelper, WindowsInput, type InputHelper } from './screen-input';
 import { LOCAL_FILE } from './screen-service-server';
 
@@ -121,5 +122,15 @@ describe('the service’s input through the administrator side', () => {
     helpers[0].helper.emit('exit'); await new Promise((resolve) => setTimeout(resolve, 100));
     input.key(0x62, true); await until(() => helpers[1]?.state.lines.length === 1);
     expect(made).toBe(2); expect(helpers[1].state.lines).toEqual(['c 98 1']); input.close();
+  });
+});
+
+// The protected helper (native/trace-input.c) takes exactly the lines the relay takes; run where it was built (Windows CI).
+const helperExe = path.join(__dirname, '..', '..', '..', 'dist-electron', 'native', 'trace-input.exe');
+describe('the protected helper\'s grammar', () => {
+  it.runIf(process.platform === 'win32' && fs.existsSync(helperExe))('accepts exactly the relay\'s commands', () => {
+    const lines = ['m 1 2 3 4', 'm -1 -2 3 -4', 'k 13 1 0', 'c 65 1', 'c 1114111 0', 'm 1  2 3 4', 'm 1 2 3 4 ', ' m 1 2 3 4', 'k 1234 1 0', 'k 13 2 0', 'c 12345678 1', 'm 1234567 1 1 1', 'm 1 2 -3 4', 'k -1 1 0', 'c 65', 'x 1 2', 'm --1 2 3 4', 'c 0065 1', 'm 123456 -123456 12345 -123456'];
+    const run = spawnSync(helperExe, ['--check'], { input: lines.join('\n') + '\n', encoding: 'utf8' });
+    expect(run.status).toBe(0); expect(run.stdout.trim().split(/\r?\n/)).toEqual(lines.map((line) => COMMAND.test(line) ? 'ok' : 'bad'));
   });
 });

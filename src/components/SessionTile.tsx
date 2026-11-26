@@ -15,7 +15,7 @@ import { channelsOf, hiddenSeats, useWorkspaceStore } from '../state/workspace-s
 import { WorktreeControls } from './WorktreeControls';
 import { EngineControls } from './EngineControls';
 import { TerminalViewport } from './TerminalViewport';
-import { useChannelName } from '../state/channel-names';
+import { channelDirectory, useChannelName } from '../state/channel-names';
 import { modelLabel } from '../../shared/model-name';
 import { ChatView } from './chat/ChatView';
 import { TranscriptView } from './chat/TranscriptView';
@@ -43,6 +43,7 @@ import { isAgentConfig, isChatEngineConfig, isChatRun } from '../../shared/types
 import { closeAsks, ConfirmStep } from './ConfirmStep';
 import { openPreview, usePreviewStore } from '../state/preview-store';
 import { previewLabel } from '../../shared/app-preview';
+import { useChannel } from '../state/last-channel';
 
 /** What "tok" counts, and the cache traffic it leaves out. */
 const tokenDetail = (usage: UsageRecord) => `New tokens this run: ${freshInput(usage).toLocaleString()} input${usage.engine === 'claude' && usage.cacheWrite ? ` (including ${usage.cacheWrite.toLocaleString()} written to the cache)` : ''} + ${usage.output.toLocaleString()} output. Not counted: ${usage.cached.toLocaleString()} cache reads.`;
@@ -79,7 +80,7 @@ export const SessionTile = memo(function SessionTile({ session, index }: { sessi
   /** The app this channel's run printed the address of (1.39.0): Preview opens it beside the channels. */
   const offer = usePreviewStore((s) => s.offers[session.id]); const preview = session.status === 'running' ? offer : undefined;
   const { engines, rootDirectory, focusedSessionId, toggleFocus, addSession, updateConfig, updateBinding, setView } = useWorkspaceStore(useShallow((s) => ({ engines: s.engines, rootDirectory: s.rootDirectory, focusedSessionId: s.focusedSessionId, toggleFocus: s.toggleFocus, addSession: s.addSession, updateConfig: s.updateConfig, updateBinding: s.updateBinding, setView: s.setView })));
-  const cwd = session.runningCwd ?? (session.binding.mode === 'independent' ? session.binding.cwd : rootDirectory);
+  const cwd = channelDirectory(session, rootDirectory);
   const engine = session.config.engine;
   const claude = engine === 'claude';
   const shell = engine === 'shell';
@@ -164,7 +165,7 @@ export const SessionTile = memo(function SessionTile({ session, index }: { sessi
   const detailOpen = detailPinned || controlsOpen || conversation || confirmClose;
   return (
     <article ref={tile} style={custom ? { '--ch': look.color } as CSSProperties : undefined} className={`session-tile tr-tile ${engine} state-${state} ${controlsOpen ? 'config-open' : ''} ${detailOpen ? 'detail-open' : ''} ${focusedSessionId === session.id ? 'selected' : ''} ${confirmClose ? 'closing' : ''}`}
-      data-session={session.id} onFocusCapture={() => { if (session.unseen) useWorkspaceStore.getState().markSeen(session.id); /* The desktop leads this channel's size again (1.35.2). */ if (session.status === 'running') void window.codingHub?.focusChannel?.({ sessionId: session.id }).catch(() => {}); }} onPointerDownCapture={() => { if (session.unseen) useWorkspaceStore.getState().markSeen(session.id); }} data-status={session.status} data-state={state} data-account={tone} aria-label={`${name} channel ${channel}${account ? `, ${account.name} account` : ''}`} tabIndex={0} onKeyDownCapture={() => { /* Typing in it (focus already there, so no focus event) is looking at it too. */ if (session.unseen) useWorkspaceStore.getState().markSeen(session.id); }} onKeyDown={onTileKey}>
+      data-session={session.id} onFocusCapture={() => { useChannel(session.id); if (session.unseen) useWorkspaceStore.getState().markSeen(session.id); /* The desktop leads this channel's size again (1.35.2). */ if (session.status === 'running') void window.codingHub?.focusChannel?.({ sessionId: session.id }).catch(() => {}); }} onPointerDownCapture={() => { if (session.unseen) useWorkspaceStore.getState().markSeen(session.id); }} data-status={session.status} data-state={state} data-account={tone} aria-label={`${name} channel ${channel}${account ? `, ${account.name} account` : ''}`} tabIndex={0} onKeyDownCapture={() => { /* Typing in it (focus already there, so no focus event) is looking at it too. */ if (session.unseen) useWorkspaceStore.getState().markSeen(session.id); }} onKeyDown={onTileKey}>
       <div className="tr-tile-top">
         <header className="tile-header tr-tile-head">
           <span className="tile-drag-handle" title="Drag to reorder"><GripVertical size={14} /></span>

@@ -6,11 +6,14 @@ import { channelsOf, useWorkspaceStore } from '../state/workspace-store';
 import { FileBrowser } from './FileBrowser';
 import { DiffViewer } from './DiffViewer';
 import { CommitHistory } from './CommitHistory';
+import { channelDirectory } from '../state/channel-names';
+import { startingChoice, useLastChannel } from '../state/last-channel';
 
 export function RepositoryPanel({ mode }: { mode: 'files' | 'diff' }) {
   const { rootDirectory, sessions, setView, setRootDirectory } = useWorkspaceStore();
-  // Review changes on a channel opens that channel's repository; otherwise Changes starts at the workspace root.
-  const [selection, setSelection] = useState(() => { const id = useWorkspaceStore.getState().reviewSessionId; return id && sessions.some((session) => session.id === id) ? id : 'workspace'; });
+  // Review changes on a channel opens that channel's repository; otherwise the folder of the channel last used, when it is
+  // not the workspace root (several projects, step 3), else the root.
+  const [selection, setSelection] = useState(() => startingChoice(channelsOf(sessions), rootDirectory, useWorkspaceStore.getState().reviewSessionId, useLastChannel.getState().sessionId));
   useEffect(() => { if (useWorkspaceStore.getState().reviewSessionId) useWorkspaceStore.setState({ reviewSessionId: null }); }, []);
   const [repository, setRepository] = useState<RepositoryContext | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -20,7 +23,7 @@ export function RepositoryPanel({ mode }: { mode: 'files' | 'diff' }) {
   const [history, setHistory] = useState(false);
   const choices = [
     { id: 'workspace', name: 'Workspace root', directory: rootDirectory },
-    ...channelsOf(sessions).map((session, index) => ({ id: session.id, name: `Channel ${index + 1} · ${session.title}`, directory: session.status === 'running' ? session.runningCwd : session.binding.mode === 'independent' ? session.binding.cwd : rootDirectory })),
+    ...channelsOf(sessions).map((session, index) => ({ id: session.id, name: `Channel ${index + 1} · ${session.title}`, directory: channelDirectory(session, rootDirectory) })),
   ];
   const selected = choices.find((choice) => choice.id === selection) ?? choices[0];
   const directory = selected.directory;

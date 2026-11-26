@@ -12,6 +12,7 @@ import { NeedsYouCell } from './NeedsYou';
 import { Check, CircleAlert, Coins, Folder, LoaderCircle, TriangleAlert } from 'lucide-react';
 import { useAccountStore } from '../../state/account-store';
 import { ENGINE_ICONS } from '../tile/engine-icons';
+import { channelProject, inActiveProject, useWorktrees } from '../../state/projects';
 
 /** Compact token counts for status cells: 812, 48.2k, 1.3M. */
 export const compact = (value: number) => new Intl.NumberFormat('en', { notation: 'compact', maximumFractionDigits: 1 }).format(value).toLowerCase();
@@ -44,6 +45,9 @@ export function jumpToChannel(id: string) {
   const state = useWorkspaceStore.getState();
   // A Round Table's hidden seat is answered in its lead's tile.
   id = leadOf(state.sessions, id)?.id ?? id;
+  // A channel of another project: that project opens first, so its tile is in the grid (several projects, step 6).
+  const target = state.sessions.find((session) => session.id === id); const worktrees = useWorktrees.getState().list;
+  if (target && !inActiveProject(target, state.rootDirectory, worktrees)) { const project = channelProject(target, state.rootDirectory, worktrees); if (project) state.setRootDirectory(project); }
   // Only the isolated tile's terminal is mounted; isolate the requested one instead.
   if (state.focusedSessionId && state.focusedSessionId !== id) state.toggleFocus(id);
   state.setView('workspace'); requestAnimationFrame(() => {

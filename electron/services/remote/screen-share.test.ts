@@ -33,16 +33,18 @@ async function share(options: { refuse?: boolean; left?: string; input?: string 
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'screen-share-')); cleanup.push(() => fs.rmSync(root, { recursive: true, force: true }));
   const port = await freePort(); const inputPort = await freePort(); const calls: { file: string; args: string[] }[] = [];
   let whole: http.Server | null = options.left !== undefined ? await health(port, options.left) : null; if (!whole) await health(port, '1.27.0');
-  let side: http.Server | null = options.input !== undefined ? await health(inputPort, options.input) : null;
+  let side: http.Server | null = options.input !== undefined ? await health(inputPort, options.input) : null; let piped = false;
   const run = async (file: string, args: string[]) => {
     calls.push({ file, args });
     if (file === 'powershell.exe' && options.refuse) return { code: 1, output: 'Start-Process : This command cannot be run due to the error: The operation was canceled by the user.' };
-    if (file === 'schtasks.exe' && args[0] === '/End') { if (whole) { await stop(whole); whole = null; await health(port, '1.27.0'); } if (side) { await stop(side); side = null; } }
-    if (file === 'schtasks.exe' && args[0] === '/Run' && !side && !whole) side = await health(inputPort, '1.27.0');
+    if (file === 'schtasks.exe' && args[0] === '/End') { piped = false; if (whole) { await stop(whole); whole = null; await health(port, '1.27.0'); } if (side) { await stop(side); side = null; } }
+    // The task runs the protected helper (1.46), which answers on its pipe; a relay on the input port is one set up before it.
+    if (file === 'schtasks.exe' && args[0] === '/Run' && !side && !whole) piped = true;
     return { code: 0, output: '' };
   };
   const screen = new ScreenShare(root, () => 'Obsidian-Halo', async () => '', port, run, undefined, inputPort);
   Object.defineProperty(screen, 'supported', { get: () => true });
+  screen.pipeAnswers = async () => piped; screen.helper = () => ({ file: 'C:\\Trace\\resources\\app\\dist-electron\\native\\trace-input.exe', sha256: 'ab12' });
   return { screen, root, calls, inputPort, setting: () => JSON.parse(fs.readFileSync(path.join(root, SHARE_FILE), 'utf8')) };
 }
 
@@ -54,6 +56,7 @@ describe('sharing the screen as administrator', () => {
     await new Promise<void>((resolve) => server.listen(port, '127.0.0.1', resolve)); cleanup.push(() => stop(server)); const side = await health(inputPort, '1.27.0');
     fs.writeFileSync(path.join(root, SHARE_FILE), JSON.stringify({ enabled: true, elevated: true })); fs.writeFileSync(path.join(root, 'screen-service-local.json'), JSON.stringify({ token: 't'.repeat(43) }));
     const screen = new ScreenShare(root, () => 'Obsidian-Halo', async () => '', port, async () => ({ code: 0, output: '' }), undefined, inputPort); Object.defineProperty(screen, 'supported', { get: () => true });
+    let piped = true; screen.pipeAnswers = async () => piped;
     const told: string[] = []; screen.onProblem = (message) => told.push(message);
     await screen.ensure();
     // Trace's own key is what it asks with. The capture is the ordinary service's, so the reason does not send the person to the administrator option.
@@ -64,7 +67,9 @@ describe('sharing the screen as administrator', () => {
     await screen.verify(); expect(told).toHaveLength(1);
     answer = { ok: true }; expect(await screen.verify()).toBeNull(); expect((await screen.status()).problem).toBeNull();
     // Captured, but the administrator side is gone: said too, and it names its option. Without the option it is no problem.
-    await stop(side); expect(await screen.verify()).toContain('apps running as administrator cannot be controlled'); expect(told).toHaveLength(2); expect(told[1]).toContain('Also control apps running as administrator');
+    // Only a relay from before 1.46 answers: it works, but the person is told to set it up again for the protected helper.
+    piped = false; expect(await screen.verify()).toContain('older part of Trace'); expect(told).toHaveLength(2);
+    await stop(side); expect(await screen.verify()).toContain('apps running as administrator cannot be controlled'); expect(told).toHaveLength(3); expect(told[2]).toContain('Also control apps running as administrator');
     fs.writeFileSync(path.join(root, SHARE_FILE), JSON.stringify({ enabled: true })); expect(await screen.verify()).toBeNull();
   });
 
@@ -92,10 +97,14 @@ describe('sharing the screen as administrator', () => {
     await ordinary.screen.ensure(); expect(ordinary.calls.filter((call) => call.file === 'schtasks.exe')).toEqual([]);
   });
 
-  it('registers a task for this user, with their highest rights, never stopped for running long', () => {
-    const script = registerTaskScript('C:\\Program Files\\Trace\\Trace.exe', ['--screen-service', '--storage=C:\\Users\\o\'neil\\data', '--elevated'], 'PC\\o\'neil');
-    expect(script).toContain("-Execute 'C:\\Program Files\\Trace\\Trace.exe'");
-    expect(script).toContain(`-Argument '"--screen-service" "--storage=C:\\Users\\o''neil\\data" "--elevated"'`);
+  it('registers a task for this user, with their highest rights, never stopped for running long, that runs the protected helper', () => {
+    const script = registerTaskScript('C:\\Users\\o\'neil\\AppData\\Local\\Programs\\Trace\\resources\\app\\dist-electron\\native\\trace-input.exe', 'ab12', 'PC\\o\'neil');
+    // Copied into Program Files\Trace Input (administrators only), checked against the hash measured before Windows asked, and run from there.
+    expect(script).toContain("$folder = Join-Path $env:ProgramFiles 'Trace Input'"); expect(script).toContain("/inheritance:r /grant:r '*S-1-5-32-544:(OI)(CI)F' '*S-1-5-18:(OI)(CI)F' '*S-1-5-32-545:(OI)(CI)RX'");
+    expect(script).toContain("Copy-Item -LiteralPath 'C:\\Users\\o''neil\\AppData\\Local\\Programs\\Trace\\resources\\app\\dist-electron\\native\\trace-input.exe' -Destination $target -Force");
+    expect(script).toContain("-Algorithm SHA256).Hash -ne 'AB12'"); expect(script.indexOf('Get-FileHash')).toBeLessThan(script.indexOf('Register-ScheduledTask'));
+    expect(script).toContain("New-ScheduledTaskAction -Execute $target -Argument 'o_neil'"); expect(script).not.toContain('Trace.exe');
+    expect(removeTaskScript()).toContain('Remove-Item -LiteralPath $folder -Recurse -Force');
     expect(script).toContain("-AtLogOn -User 'PC\\o''neil'"); expect(script).toContain('-LogonType Interactive -RunLevel Highest');
     expect(script).toContain('-ExecutionTimeLimit ([TimeSpan]::Zero)'); expect(script).toContain('-RestartCount 3');
     expect(script).toContain(`-TaskName '${TASK_NAME}'`); expect(removeTaskScript()).toContain(`Unregister-ScheduledTask -TaskName '${TASK_NAME}'`);
@@ -117,7 +126,7 @@ describe('sharing the screen as administrator', () => {
     expect(run.status).toBe(0); expect(JSON.parse(run.stdout)).toEqual(args);
   });
   it.runIf(process.platform === 'win32')('writes scripts PowerShell can read (parsed only, not run)', () => {
-    for (const script of [registerTaskScript('C:\\Trace\\Trace.exe', ['--screen-service', '--storage=C:\\x y'], 'PC\\me'), removeTaskScript(), elevatedScript(removeTaskScript())]) {
+    for (const script of [registerTaskScript('C:\\Trace\\resources\\app\\dist-electron\\native\\trace-input.exe', 'ab12', 'PC\\me'), removeTaskScript(), elevatedScript(removeTaskScript())]) {
       const check = `$errors = $null; [void][System.Management.Automation.Language.Parser]::ParseInput([Text.Encoding]::Unicode.GetString([Convert]::FromBase64String('${Buffer.from(script, 'utf16le').toString('base64')}')), [ref]$null, [ref]$errors); $errors.Count`;
       expect(execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', check], { encoding: 'utf8' }).trim()).toBe('0');
     }
@@ -128,7 +137,8 @@ describe('sharing the screen as administrator', () => {
     const status = await screen.set(true, true);
     expect(status).toMatchObject({ enabled: true, elevated: true, running: true }); expect(setting()).toEqual({ enabled: true, elevated: true });
     const elevate = calls.find((call) => call.file === 'powershell.exe')!; expect(decode(elevate.args)).toContain('-Verb RunAs');
-    expect(Buffer.from(/'-EncodedCommand','([^']+)'/.exec(decode(elevate.args))![1], 'base64').toString('utf16le')).toContain('--elevated');
+    // The task is set up to run the protected helper, copied from this Trace (1.46), not Trace itself.
+    const registered = Buffer.from(/'-EncodedCommand','([^']+)'/.exec(decode(elevate.args))![1], 'base64').toString('utf16le'); expect(registered).toContain('trace-input.exe'); expect(registered).toContain("-Hash -ne 'AB12'".replace('-Hash', 'Hash'));
     // The service itself captures, so it still starts at sign-in; the task starts only the side that presses the keys.
     expect(calls.at(-1)).toEqual({ file: 'schtasks.exe', args: ['/Run', '/TN', TASK_NAME] }); expect(login.at(-1)!.openAtLogin).toBe(true); expect(login.at(-1)!.args).not.toContain('--elevated'); expect(status.problem).toBeNull();
     // Already as administrator: turning sharing off and on again asks nothing more.

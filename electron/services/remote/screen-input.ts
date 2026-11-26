@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process';
+import net from 'node:net';
 import { EventEmitter } from 'node:events';
 import http from 'node:http';
 import { keyAction } from './keysyms';
@@ -59,22 +60,42 @@ export const localHelper = (): InputHelper => spawn('powershell.exe', helperArgu
  * those apps is still controlled. When the connection ends it reports an exit, and the next input connects again.
  */
 export function relayHelper(port: number, token: string, local: () => InputHelper = localHelper): InputHelper {
+  return connectedHelper((use, fail, closed) => {
+    const request = http.request({ host: '127.0.0.1', port, path: '/input', timeout: 3000, headers: { Connection: 'Upgrade', Upgrade: 'trace-input', Authorization: `Bearer ${token}` } });
+    request.on('upgrade', (_response, socket) => {
+      // The connect timeout must not end a quiet session.
+      socket.setTimeout(0); socket.on('error', () => {}); socket.on('close', closed); socket.resume();
+      if (!use({ write: (line) => socket.write(line), end: () => socket.end() })) socket.destroy();
+    });
+    request.on('response', (response) => { response.resume(); fail(); }); request.on('error', fail); request.on('timeout', () => request.destroy(new Error('timeout')));
+    request.end();
+  }, local);
+}
+/**
+ * The protected helper's pipe (native/trace-input.c, from 1.46), which the administrator task runs from Program Files:
+ * the same lines. When it is not there, `fallback` (the older relay, then this process's own rights) presses instead.
+ */
+export function pipeHelper(pipe: string, fallback: () => InputHelper = localHelper): InputHelper {
+  return connectedHelper((use, fail, closed) => {
+    const socket = net.connect(pipe); let connected = false;
+    socket.on('connect', () => { connected = true; socket.on('close', closed); if (!use({ write: (line) => socket.write(line), end: () => socket.end() })) socket.destroy(); });
+    socket.on('error', () => { if (!connected) fail(); });
+  }, fallback);
+}
+/**
+ * An input helper reached by connecting (`open`): lines written while it connects wait, in order; when it cannot be
+ * reached `local` presses instead; when the connection ends it reports an exit, and the next input connects again.
+ */
+function connectedHelper(open: (use: (target: { write(line: string): unknown; end(): unknown }) => boolean, fail: () => void, closed: () => void) => void, local: () => InputHelper): InputHelper {
   const events = new EventEmitter(); let waiting: string[] | null = []; let ended = false;
   let target: { write(line: string): unknown; end(): unknown } | null = null;
-  const use = (next: NonNullable<typeof target>) => { if (target) return; target = next; for (const line of waiting ?? []) next.write(line); waiting = null; if (ended) next.end(); };
+  const use = (next: NonNullable<typeof target>) => { if (target) return false; target = next; for (const line of waiting ?? []) next.write(line); waiting = null; if (ended) next.end(); return true; };
   const fallback = () => {
     if (target) return; const helper = local();
     helper.on('error', () => events.emit('exit')); helper.on('exit', () => events.emit('exit')); helper.stdout.resume(); helper.stderr.resume(); helper.stdin.on('error', () => {});
     use(helper.stdin);
   };
-  const request = http.request({ host: '127.0.0.1', port, path: '/input', timeout: 3000, headers: { Connection: 'Upgrade', Upgrade: 'trace-input', Authorization: `Bearer ${token}` } });
-  request.on('upgrade', (_response, socket) => {
-    // The connect timeout must not end a quiet session.
-    socket.setTimeout(0); socket.on('error', () => {}); socket.on('close', () => events.emit('exit')); socket.resume();
-    if (target) socket.destroy(); else use({ write: (line) => socket.write(line), end: () => socket.end() });
-  });
-  request.on('response', (response) => { response.resume(); fallback(); }); request.on('error', fallback); request.on('timeout', () => request.destroy(new Error('timeout')));
-  request.end();
+  open(use, fallback, () => events.emit('exit'));
   return {
     stdin: { write: (line) => (target ? target.write(line) : waiting?.push(line)), end: () => { ended = true; target?.end(); }, on: () => {} },
     stdout: { resume: () => {} }, stderr: { resume: () => {} }, on: (event, listener) => events.on(event, listener),
