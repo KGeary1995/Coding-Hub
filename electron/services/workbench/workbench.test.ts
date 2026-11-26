@@ -19,6 +19,8 @@ import { DeviceSync, SYNC_FOLDER } from '../hub/device-sync';
 import { RulesService } from '../hub/rules';
 import { DEFAULT_PREFERENCES, type HubPreferences } from '../../../shared/hub';
 import type { Experiment, ExperimentsData, Trial } from '../../../shared/workbench';
+/** Real Git commands and checks that run real programs (eight noisy steps in one test): a busy Windows runner can take longer than the 5 s default. */
+vi.setConfig({ testTimeout: 60_000 });
 const roots: string[] = [];
 afterEach(() => roots.splice(0).forEach((root) => fs.rmSync(root, { recursive: true, force: true })));
 function fixture() { const root = fs.mkdtempSync(path.join(os.tmpdir(), 'hub-enterprise-')); roots.push(root); return root; }

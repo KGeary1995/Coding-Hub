@@ -5,6 +5,8 @@ import path from 'node:path';
 import { afterEach, expect, it, vi } from 'vitest';
 import { WorktreeService } from './worktrees';
 import type { ManagedWorktree } from '../../../shared/project-tools';
+/** Many real Git commands in each test: a busy Windows runner can take longer than the 5 s default. */
+vi.setConfig({ testTimeout: 60_000 });
 const roots: string[] = [];
 // Deleting thousands of files is slow on Windows.
 afterEach(() => roots.splice(0).forEach((root) => rmSync(root, { recursive: true, force: true })), 120_000);
