@@ -21,9 +21,11 @@ describe('the terminal theme', () => {
 
 describe('the terminals’ font size', () => {
   it('shows a size left at the default one smaller on a laptop’s screen, and keeps a size the person set', () => {
-    expect(terminalFontSize(13, 1470)).toBe(12); expect(terminalFontSize(13, SMALL_SCREEN_WIDTH)).toBe(13); expect(terminalFontSize(13, 2560)).toBe(13);
-    expect(terminalFontSize(14, 1470)).toBe(14); expect(terminalFontSize(11, 1470)).toBe(11);
+    expect(terminalFontSize(13, true, 1470)).toBe(12); expect(terminalFontSize(13, true, SMALL_SCREEN_WIDTH)).toBe(13); expect(terminalFontSize(13, true, 2560)).toBe(13);
+    expect(terminalFontSize(14, true, 1470)).toBe(14); expect(terminalFontSize(11, true, 1470)).toBe(11);
+    // Turned off in Settings: 13 on a laptop too.
+    expect(terminalFontSize(13, false, 1470)).toBe(13);
     // No screen to measure (a test window): as set.
-    expect(terminalFontSize(13, Infinity)).toBe(13);
+    expect(terminalFontSize(13, true, Infinity)).toBe(13);
   });
 });

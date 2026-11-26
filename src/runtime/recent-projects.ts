@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import type { SyncedProject } from '../../shared/hub';
 import { hubCall, useHubStore } from '../state/hub-store';
 import { useWorkspaceStore } from '../state/workspace-store';
+import { openProject } from '../state/projects';
 
 /** Recent projects (several projects, step 4: docs/plans/several-projects.md): the folders opened last, newest first. */
 export const MAX_RECENT = 10;
@@ -37,5 +38,5 @@ export async function cloneSyncedProject(project: SyncedProject): Promise<boolea
   // Said in the project menu, where it was chosen.
   if (!result.ok) { useSyncedProjects.setState({ error: `${project.name} could not be cloned: ${result.error.message}` }); return false; }
   useSyncedProjects.setState({ error: null });
-  useWorkspaceStore.getState().setRootDirectory((result.value as { directory: string }).directory); return true;
+  openProject((result.value as { directory: string }).directory); return true;
 }

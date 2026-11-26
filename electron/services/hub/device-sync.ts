@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
-import { execFileSync } from 'node:child_process';
+import { execFile } from 'node:child_process';
 import { z } from 'zod';
 import { DEFAULT_PREFERENCES, type DeviceSyncStatus, type HubPreferences, type SyncedComputer, type SyncedDocument, type SyncedProject, type UsageRecord } from '../../../shared/hub';
 import type { ProjectTemplate } from '../../../shared/productivity';
@@ -55,6 +55,8 @@ const agentDocument = documentSchema(agentDefinitionSchema.nullable());
 const projectSchema = z.object({ name: z.string().min(1).max(200), repository: z.string().regex(/^[A-Za-z0-9-]{1,39}\/[A-Za-z0-9._-]{1,100}$/) }).strict();
 const projectsDocument = documentSchema(z.array(projectSchema).max(50));
 /** A GitHub remote's owner/repository (https or ssh, with or without .git); anything else is not shared. */
+/** How long a recent project without a GitHub origin waits before its origin is read again. */
+const REMOTE_AGAIN = 10 * 60_000;
 export function githubRepository(remote: string): string | null { const match = /github\.com[:/]([A-Za-z0-9-]{1,39})\/([A-Za-z0-9._-]{1,100}?)(?:\.git)?\/?$/.exec(remote.trim()); return match ? `${match[1]}/${match[2]}` : null; }
 const settingsDocument = versionedSchema(settingsSchema); const rulesDocument = versionedSchema(rulesSchema); const usageDocument = documentSchema(z.array(usageSchema).max(2000));
 type Machine = z.infer<typeof machineSchema>;
@@ -116,7 +118,7 @@ export class DeviceSync {
   private elsewhere: NonNullable<DeviceSyncStatus['elsewhere']> | null = null; private elsewhereChecked = { at: 0, folder: '' };
   private computers = new Map<string, SyncedComputer>();
   private remoteUsage = new Map<string, { mtime: number; records: UsageRecord[] }>();
-  private remoteProjects = new Map<string, { mtime: number; projects: SyncedProject[] }>(); private projectsHash = ''; private remotes = new Map<string, string | null>();
+  private remoteProjects = new Map<string, { mtime: number; projects: SyncedProject[] }>(); private projectsHash = ''; private remotes = new Map<string, { repository: string | null; at: number }>(); private looking = new Map<string, Promise<void>>();
   private addresses = new Map<string, { id: string; name: string; url: string | null }>();
   /** This computer's phone remote address on the tailnet, when it has one; other computers link to it there. */
   advertise: () => string | null = () => null;
@@ -245,19 +247,29 @@ export class DeviceSync {
     }
     if (unreadable) throw new HubError('SYNC_FILE', `${unreadable} shared agent definition${unreadable === 1 ? '' : 's'} could not be read; this computer's copies were kept.`);
   }
-  /** This computer's recent projects that have a GitHub remote, each read once (git remote get-url origin). */
+  /**
+   * This computer's recent projects that have a GitHub remote. Each origin is read in the background (git remote get-url
+   * origin: a slow or unreachable folder must not hold up the app) and kept; a project shows from the sync after it is
+   * read. One without a GitHub origin is read again after a while, so an origin added later is shared without a restart.
+   */
   private localProjects(): { name: string; repository: string }[] {
     const out: { name: string; repository: string }[] = [];
     for (const directory of this.preferences().recentProjects ?? []) {
-      if (!this.remotes.has(directory)) { let remote: string | null = null; try { remote = githubRepository(execFileSync('git', ['-C', directory, 'remote', 'get-url', 'origin'], { encoding: 'utf8', timeout: 3000, windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'] })); } catch { /* No Git, no origin, or gone. */ } this.remotes.set(directory, remote); }
-      const repository = this.remotes.get(directory); if (repository && !out.some((item) => item.repository === repository)) out.push({ name: path.basename(directory) || repository, repository });
+      const known = this.remotes.get(directory);
+      if ((!known || (!known.repository && Date.now() - known.at >= REMOTE_AGAIN)) && !this.looking.has(directory)) this.looking.set(directory, new Promise<void>((resolve) => {
+        execFile('git', ['-C', directory, 'remote', 'get-url', 'origin'], { encoding: 'utf8', timeout: 3000, windowsHide: true }, (error, stdout) => { this.remotes.set(directory, { repository: error ? null : githubRepository(stdout), at: Date.now() }); this.looking.delete(directory); resolve(); });
+      }));
+      const repository = known?.repository; if (repository && !out.some((item) => item.repository === repository)) out.push({ name: path.basename(directory) || repository, repository });
     }
     return out;
   }
+  /** Resolves once the origins being read are known (tests). */
+  remotesRead() { return Promise.all(this.looking.values()).then(() => undefined); }
   /** Each computer writes its own projects file, as with usage, so two computers never conflict over the list. */
   private projects(folder: string) {
     const own = path.join(folder, 'projects', this.machine.id + '.json'); const projects = this.localProjects(); const hash = digest([folder, this.machine, projects]);
-    if (hash !== this.projectsHash || !fs.existsSync(own)) { writeJson(own, { version: 1, machine: this.machine, updatedAt: new Date().toISOString(), value: projects }); this.projectsHash = hash; }
+    // Origins still being read: a file already there waits for them rather than being written short (offers would vanish).
+    if ((hash !== this.projectsHash || !fs.existsSync(own)) && !(this.looking.size && fs.existsSync(own))) { writeJson(own, { version: 1, machine: this.machine, updatedAt: new Date().toISOString(), value: projects }); this.projectsHash = hash; }
     const directory = path.join(folder, 'projects'); const present = new Set<string>();
     for (const name of fs.readdirSync(directory)) {
       const match = /^([0-9a-f-]{36})\.json$/.exec(name); if (!match || match[1] === this.machine.id) continue;
@@ -271,7 +283,11 @@ export class DeviceSync {
     for (const id of this.remoteProjects.keys()) if (!present.has(id)) this.remoteProjects.delete(id);
   }
   /** The other computers' projects that this one has not opened (by repository), newest computer's first, each once. */
-  syncedProjects(): SyncedProject[] {
+  async syncedProjects(): Promise<SyncedProject[]> {
+    // Sync turned off: what was read before is not offered.
+    try { if (!this.preferences().syncDevices) return []; } catch { return []; }
+    // This computer's origins known first: a project open here is not offered while its origin is still being read.
+    this.localProjects(); await this.remotesRead();
     const here = new Set(this.localProjects().map((item) => item.repository.toLowerCase())); const out: SyncedProject[] = [];
     for (const { projects } of this.remoteProjects.values()) for (const project of projects) if (!here.has(project.repository.toLowerCase()) && !out.some((item) => item.repository.toLowerCase() === project.repository.toLowerCase())) out.push(project);
     return out;

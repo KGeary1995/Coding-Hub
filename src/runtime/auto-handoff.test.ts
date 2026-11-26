@@ -49,6 +49,45 @@ describe('asking an agent for a handoff near its context limit', () => {
   });
 });
 
+describe('a chat channel’s automatic handoff', () => {
+  afterEach(() => { vi.unstubAllGlobals(); useHandoffStore.setState({ bySession: {} }); });
+  it('tries a compaction refused as busy again at the next turn’s end, not counted as unsaved turns, keeps it as an earlier one back under the limit, and clears any other phase there', async () => {
+    const chats: Record<string, unknown>[] = []; let compact = { ok: false, error: { code: 'CHAT_BUSY', message: 'busy' } } as { ok: boolean; error?: { code: string; message: string } };
+    vi.stubGlobal('window', { codingHub: { chat: async (request: Record<string, unknown>) => { chats.push(request); return request.action === 'compact' ? compact : { ok: true, value: null }; }, hub: async (request: { action: string }) => ({ ok: true, value: request.action === 'memory-key' ? 'k' : [{ author: 'claude', createdAt: new Date(Date.now() + 1000).toISOString() }] }) } });
+    const one = session({ id: 'c1', runId: 'rc1', config: { engine: 'claude', chat: true, model: '', thinking: { budget_tokens: null }, tokenLimits: { maxOutputTokens: null, maxSessionTokens: null } } });
+    const at = (used: number) => useHubStore.setState({ usage: [{ ...usage(used, 1_000_000), sessionId: 'c1', runId: 'rc1' }], preferences: {} } as never);
+    useWorkspaceStore.setState({ sessions: [one], rootDirectory: '/p' } as never); at(850_000);
+    expect(await askForHandoff('c1', 0)).toBe(true); expect(useHandoffStore.getState().bySession.c1.phase).toBe('asked');
+    // Saved, but the compaction is refused (a turn started first): still saved, and tried again.
+    await askForHandoff('c1', 0); expect(useHandoffStore.getState().bySession.c1.phase).toBe('saved');
+    // Busy over more turns than an unsaved handoff is given: still saved, not given up.
+    for (let turn = 0; turn < 4; turn++) await askForHandoff('c1', 0); expect(useHandoffStore.getState().bySession.c1.phase).toBe('saved');
+    compact = { ok: true }; await askForHandoff('c1', 0); expect(useHandoffStore.getState().bySession.c1.phase).toBe('compacted');
+    expect(chats.filter((request) => request.action === 'compact')).toHaveLength(6);
+    // Back under the limit: the compaction is kept as an earlier one (still told); another phase left from a climb is not.
+    at(30_000); await askForHandoff('c1', 0); expect(useHandoffStore.getState().bySession.c1.phase).toBe('earlier');
+    useHandoffStore.setState({ bySession: { c1: { runId: 'rc1', phase: 'saved' } } }); await askForHandoff('c1', 0); expect(useHandoffStore.getState().bySession.c1).toBeUndefined();
+  });
+  it('does not try a compaction again that is refused for another reason than busy', async () => {
+    const chats: Record<string, unknown>[] = [];
+    vi.stubGlobal('window', { codingHub: { chat: async (request: Record<string, unknown>) => { chats.push(request); return request.action === 'compact' ? { ok: false, error: { code: 'COMPACT_UNAVAILABLE', message: 'no' } } : { ok: true, value: null }; }, hub: async (request: { action: string }) => ({ ok: true, value: request.action === 'memory-key' ? 'k' : [{ author: 'claude', createdAt: new Date(Date.now() + 1000).toISOString() }] }) } });
+    const one = session({ id: 'c2', runId: 'rc2', config: { engine: 'claude', chat: true, model: '', thinking: { budget_tokens: null }, tokenLimits: { maxOutputTokens: null, maxSessionTokens: null } } });
+    useWorkspaceStore.setState({ sessions: [one], rootDirectory: '/p' } as never); useHubStore.setState({ usage: [{ ...usage(850_000, 1_000_000), sessionId: 'c2', runId: 'rc2' }], preferences: {} } as never);
+    await askForHandoff('c2', 0); await askForHandoff('c2', 0); await askForHandoff('c2', 0);
+    expect(chats.filter((request) => request.action === 'compact')).toHaveLength(1); expect(useHandoffStore.getState().bySession.c2.phase).toBe('saved');
+  });
+  it('does not compact again a channel compacted by hand after a busy refusal', async () => {
+    const chats: Record<string, unknown>[] = [];
+    vi.stubGlobal('window', { codingHub: { chat: async (request: Record<string, unknown>) => { chats.push(request); return request.action === 'compact' ? { ok: false, error: { code: 'CHAT_BUSY', message: 'busy' } } : { ok: true, value: null }; }, hub: async (request: { action: string }) => ({ ok: true, value: request.action === 'memory-key' ? 'k' : [{ author: 'claude', createdAt: new Date(Date.now() + 1000).toISOString() }] }) } });
+    const one = session({ id: 'c3', runId: 'rc3', config: { engine: 'claude', chat: true, model: '', thinking: { budget_tokens: null }, tokenLimits: { maxOutputTokens: null, maxSessionTokens: null } } });
+    const at = (used: number) => useHubStore.setState({ usage: [{ ...usage(used, 1_000_000), sessionId: 'c3', runId: 'rc3' }], preferences: {} } as never);
+    useWorkspaceStore.setState({ sessions: [one], rootDirectory: '/p' } as never); at(850_000);
+    await askForHandoff('c3', 0); await askForHandoff('c3', 0); expect(chats.filter((request) => request.action === 'compact')).toHaveLength(1);
+    // The person compacted it: the next turn's end sends nothing more.
+    at(40_000); await askForHandoff('c3', 0); expect(chats.filter((request) => request.action === 'compact')).toHaveLength(1);
+  });
+});
+
 describe('a Round Table seat’s automatic handoff (1.47)', () => {
   const RUNS = { s1: '11111111-1111-4111-8111-111111111111', s2: '22222222-2222-4222-8222-222222222222', s3: '33333333-3333-4333-8333-333333333333' } as const;
   const idle: RoundTableState = { partner: { sessionId: 's2', runId: RUNS.s2, engine: 'codex' }, driver: 'claude', rounds: 2, round: 0, phase: 'idle', agreed: false };

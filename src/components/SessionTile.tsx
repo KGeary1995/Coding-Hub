@@ -118,8 +118,10 @@ export const SessionTile = memo(function SessionTile({ session, index }: { sessi
   // hidden seat near its limit shows here too, while the lead itself works (Trace asks a seat on its own, from 1.47).
   const limitSeatId = useHubStore((s) => state === 'working' ? hiddenSeats(useWorkspaceStore.getState().sessions, session.id).find((seat) => channelState(seat, usageFor(seat, s.usage)) === 'limit')?.id ?? null : null);
   const handing = state === 'limit' ? session : limitSeatId ? useWorkspaceStore.getState().sessions.find((item) => item.id === limitSeatId) ?? null : null;
-  const handoff = useHandoffStore((s) => handing ? handoffPhase(s.bySession, handing) : undefined); const automaticMemory = useHubStore((s) => s.preferences.automaticMemory);
-  const shown = handing ? handoffShown(handing, useWorkspaceStore.getState().sessions, handing === session ? usage : usageFor(handing, useHubStore.getState().usage), { automaticMemory }, handoff) : 'manual';
+  const handoff = useHandoffStore((s) => handing ? handoffPhase(s.bySession, handing) : undefined);
+  // Its own last compaction, also once it is back under the limit (where `handing` is null).
+  const compacted = useHandoffStore((s) => { const phase = handoffPhase(s.bySession, session); return phase === 'compacted' || phase === 'earlier'; }); const automaticMemory = useHubStore((s) => s.preferences.automaticMemory);
+  const shown = handing ? handoffShown(handing, useWorkspaceStore.getState().sessions, handing === session ? usage : usageFor(handing, useHubStore.getState().usage), { automaticMemory }, handoff, leadsTable) : 'manual';
   const handoffTitle = handing ? `${handing === session ? '' : 'A seat at this Round Table is near the end of its context. '}${shown === 'manual' ? 'Write a handoff in Shared memory before the context runs out.' : `${HANDOFF_DETAIL[shown]} Opens Shared memory.`}` : '';
   const context = usage?.context && usage.context.limit > 0 ? usage.context : null;
   // Claude reports the tokens in context but not its window, so only the amount can be shown.
@@ -162,7 +164,7 @@ export const SessionTile = memo(function SessionTile({ session, index }: { sessi
     cwd ? `Folder ${folderName(cwd)}` : 'No folder chosen',
     usage ? `Cost ${dollars(usage.cost)}` : null,
     context ? `Context ${compact(context.used)} of ${compact(context.limit)}` : contextUsed !== null ? `Context ${compact(contextUsed)}` : null,
-    handoff === 'compacted' ? 'Handoff saved, then compacted' : null,
+    compacted ? 'Handoff saved, then compacted' : null,
   ].filter(Boolean);
   // The row stands open while what it opened is in use: the settings, a conversation, the question Close asks.
   const detailOpen = detailPinned || controlsOpen || conversation || confirmClose;

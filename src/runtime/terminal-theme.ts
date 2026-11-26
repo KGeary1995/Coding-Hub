@@ -11,10 +11,11 @@ export const SMALL_SCREEN_WIDTH = 1600;
 /**
  * The font size terminals use: the one in Settings, except that a size left at the default shows one smaller on a
  * laptop's screen, for more lines in each channel (the owner's choice of 2026-11-25). A size the person set is kept as
- * set, and the setting itself, which syncs between computers, is not changed.
+ * set, and the setting itself, which syncs between computers, is not changed. `fit` false (Settings, this computer only)
+ * keeps the default as set too, for a person who wants 13 on a laptop.
  */
-export function terminalFontSize(size: number, screenWidth = typeof window === 'undefined' ? Infinity : window.screen?.width ?? Infinity) {
-  return size === DEFAULT_PREFERENCES.terminalFontSize && screenWidth < SMALL_SCREEN_WIDTH ? size - 1 : size;
+export function terminalFontSize(size: number, fit = true, screenWidth = typeof window === 'undefined' ? Infinity : window.screen?.width ?? Infinity) {
+  return fit && size === DEFAULT_PREFERENCES.terminalFontSize && screenWidth < SMALL_SCREEN_WIDTH ? size - 1 : size;
 }
 /** The cursor is the engine's colour: --tr-ch-claude, --tr-ch-codex, --tr-ch-gemini, --tr-ch-shell. */
 export const ENGINE_CURSOR = { claude: '#ffb547', codex: '#5fe1ff', gemini: '#8c9cff', custom: '#c4b5fd', shell: '#9fc3b8' } as const;

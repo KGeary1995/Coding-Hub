@@ -89,7 +89,7 @@ export function arrangeTiles(all: Session[], mode: LayoutMode): GridTile[] {
 }
 
 /** Whether tiles stand exactly as Trace arranges them in this layout: the person has not dragged or resized one since. */
-const standArranged = (tiles: GridTile[], mode: LayoutMode) => { const own = arrangeChannels(tiles.map((tile) => tile.sessionId), mode); return tiles.every((tile, index) => tile.x === own[index].x && tile.y === own[index].y && tile.w === own[index].w && tile.h === own[index].h); };
+export const standArranged = (tiles: GridTile[], mode: LayoutMode) => { const own = arrangeChannels(tiles.map((tile) => tile.sessionId), mode); return tiles.every((tile, index) => tile.x === own[index].x && tile.y === own[index].y && tile.w === own[index].w && tile.h === own[index].h); };
 
 /**
  * Tiles that match the channels the person sees: one each, none for a hidden Round Table seat or a removed session.
@@ -239,8 +239,11 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   applyEvent: (event) => set((state) => { if (event.type === 'data') return state; let changed = false; const sessions = state.sessions.map((session) => { const next = applied(session, event); if (next !== session) changed = true; return next; }); return changed ? { sessions } : state; }),
   // Another project: the channels of the one open stay with it (pinned to its folder), so the grid, which shows the active
   // project's channels, keeps them under their project (several projects, step 6). With none open before, they follow.
+  // The tiles are laid out again, so the grid fits however many channels the project shows (saved places left gaps), and a
+  // channel maximised in the last project is not kept so (it is not drawn here, but notices and jumps went by it).
   setRootDirectory: (rootDirectory) => set((state) => { const before = state.rootDirectory; const pin = before && before !== rootDirectory;
-    return { rootDirectory, sessions: state.sessions.map((session) => session.binding.mode !== 'workspace' ? session : pin ? { ...session, binding: { mode: 'independent' as const, cwd: before } } : session.status !== 'running' && session.status !== 'starting' ? { ...session, error: null, runningCwd: null, status: session.status === 'error' ? 'idle' as const : session.status } : session) }; }),
+    const sessions = state.sessions.map((session) => session.binding.mode !== 'workspace' ? session : pin ? { ...session, binding: { mode: 'independent' as const, cwd: before } } : session.status !== 'running' && session.status !== 'starting' ? { ...session, error: null, runningCwd: null, status: session.status === 'error' ? 'idle' as const : session.status } : session);
+    return { rootDirectory, sessions, ...(before !== rootDirectory ? { tiles: arrangeTiles(sessions, state.layoutMode), focusedSessionId: null } : {}) }; }),
   setView: (activeView) => set({ activeView }),
   restoreRun: (run) => {
     const state = get();

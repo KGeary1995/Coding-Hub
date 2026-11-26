@@ -16,6 +16,8 @@ describe('what a channel near its limit shows about its handoff', () => {
     expect(handoffShown(one, [one], full, {})).toBe('at-turn-end');
     expect(handoffShown(one, [one], full, {}, 'asked')).toBe('asked');
     expect(handoffShown(one, [one], full, {}, 'saved')).toBe('saved'); expect(handoffShown(one, [one], full, {}, 'compacted')).toBe('saved');
+    // Compacted on a climb that ended: at the limit again, it is asked at turn end.
+    expect(handoffShown(one, [one], full, {}, 'earlier')).toBe('at-turn-end');
     // The agent ended three turns without saving it: the person's to write.
     expect(handoffShown(one, [one], full, {}, 'not-saved')).toBe('manual');
     expect(HANDOFF_LABEL['at-turn-end']).toBe('Handoff at turn end'); expect(HANDOFF_LABEL.manual).toBe('Write handoff');
@@ -36,7 +38,10 @@ describe('what a channel near its limit shows about its handoff', () => {
     const gemini = session({ id: 's3', config: { engine: 'gemini', chat: true, model: '' } }); const all = [lead, codex, gemini];
     const seated = { ...lead, roundTable: { ...lead.roundTable!, seats: [{ session: 's1' }, { session: 's2' }, { session: 's3' }] } }; const table = [seated, codex, gemini];
     expect(handoffShown(lead, all, full, {})).toBe('at-turn-end'); expect(handoffShown(codex, table, full, {}, 'asked')).toBe('asked'); expect(handoffShown(gemini, table, full, {}, 'saved')).toBe('saved');
-    expect(handoffShown(gemini, table, full, {})).toBe('at-turn-end'); expect(handoffShown(gemini, table, full, {}, 'compacted')).toBe('saved');
+    expect(handoffShown(gemini, table, full, {})).toBe('at-turn-end'); expect(handoffShown(gemini, table, full, {}, 'compacted')).toBe('saved'); expect(handoffShown(gemini, table, full, {}, 'earlier')).toBe('at-turn-end');
+    // The table is not open (a seat stopped, or it closed with findings kept): Trace cannot ask, so the person writes it.
+    expect(handoffShown(lead, all, full, {}, undefined, false)).toBe('manual'); expect(handoffShown(codex, table, full, {}, 'saved', false)).toBe('manual');
+    const plain = session(); expect(handoffShown(plain, [plain], full, {}, undefined, false)).toBe('at-turn-end');
   });
   it('keeps a phase for the run it belongs to: a restarted channel starts again', () => {
     setHandoffPhase('s1', 'r1', 'compacted');
@@ -55,7 +60,10 @@ describe('what a channel near its limit shows about its handoff', () => {
   it('in Needs you, lists a hidden seat near its limit under its lead’s channel, with what Trace is doing for it (1.47)', () => {
     const lead = session({ roundTable: { partner: 's2', driver: 'claude', rounds: 2 } }); const gemini = session({ id: 's2', runId: 'r2', config: { engine: 'gemini', chat: true, model: '' } });
     useWorkspaceStore.setState({ sessions: [lead, gemini], tiles: [{ sessionId: 's1', x: 0, y: 0, w: 1, h: 1 }] } as never);
-    const item = needsYou([lead, gemini], [usage(10_000, 1_000_000), usage(950_000, 1_048_576, 's2', 'r2')], [], {}, [], { phases: { s2: { runId: 'r2', phase: 'saved' } } }).find((each) => each.kind === 'limit');
+    const records = [usage(10_000, 1_000_000), usage(950_000, 1_048_576, 's2', 'r2')]; const phases = { s2: { runId: 'r2' as const, phase: 'saved' as const } };
+    const item = needsYou([lead, gemini], records, [], { s1: { phase: 'idle' } as never }, [], { phases }).find((each) => each.kind === 'limit');
     expect(item).toMatchObject({ sessionId: 's2', action: 'open', title: expect.stringContaining('CH1') }); expect(item?.detail).toContain('Trace compacts it');
+    // Its table not open: Trace cannot ask or compact it, so the person writes the handoff.
+    expect(needsYou([lead, gemini], records, [], {}, [], { phases }).find((each) => each.kind === 'limit')).toMatchObject({ action: 'handoff' });
   });
 });

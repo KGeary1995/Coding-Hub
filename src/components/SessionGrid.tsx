@@ -1,8 +1,8 @@
 import { useShallow } from 'zustand/react/shallow';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import GridLayout from 'react-grid-layout';
-import { arrangeTiles, channelsOf, useWorkspaceStore } from '../state/workspace-store';
-import { mergeTiles, refreshWorktrees, shownChannels, useAllProjects, useShownChannels, useWorktrees } from '../state/projects';
+import { channelsOf, useWorkspaceStore } from '../state/workspace-store';
+import { mergeTiles, refreshWorktrees, shownChannels, shownTiles, useAllProjects, useShownChannels, useWorktrees } from '../state/projects';
 import { SessionTile } from './SessionTile';
 import { ErrorBoundary } from './ErrorBoundary';
 
@@ -29,8 +29,9 @@ export function SessionGrid() {
     observer.observe(element);
     return () => observer.disconnect();
   }, []);
-  // With some hidden, the shown ones are laid out afresh (their saved places would leave gaps); the hidden ones go below them.
-  const layout = useMemo(() => (filtered ? arrangeTiles(sessions, layoutMode) : tiles).map(({ sessionId, ...tile }) => ({ i: sessionId, ...tile })), [filtered, sessions, layoutMode, tiles]);
+  // With some hidden, the shown ones keep a layout made while they were shown, else are laid out afresh (their places
+  // among the hidden ones would leave gaps); the hidden ones go below them (mergeTiles).
+  const layout = useMemo(() => (filtered ? shownTiles(tiles, sessions, layoutMode) : tiles).map(({ sessionId, ...tile }) => ({ i: sessionId, ...tile })), [filtered, sessions, layoutMode, tiles]);
   // A standard tile spans twelve grid rows. Fit the selected arrangement to the
   // canvas; user-resized tiles can extend it and remain reachable by scrolling.
   const bands = layoutMode === 'rows' ? sessions.length : layoutMode === 'grid' ? (sessions.length > 2 ? 2 : 1) : Math.ceil(sessions.length / 4);
@@ -52,7 +53,8 @@ export function SessionGrid() {
       draggableCancel="button,input,select,.terminal-viewport"
       compactType="vertical"
       resizeHandles={['se']}
-      onLayoutChange={(next) => { const moved = next.map(({ i, x, y, w, h, minW, minH }) => ({ sessionId: i, x, y, w, h, minW: minW ?? 3, minH: minH ?? 10 })); setTiles(filtered ? mergeTiles(tiles, moved) : moved); }}
+      // Not saved while the worktrees are unknown: a worktree's channel would count as another project's and go below.
+      onLayoutChange={(next) => { if (filtered && !useWorktrees.getState().loaded) return; const moved = next.map(({ i, x, y, w, h, minW, minH }) => ({ sessionId: i, x, y, w, h, minW: minW ?? 3, minH: minH ?? 10 })); setTiles(filtered ? mergeTiles(tiles, moved) : moved); }}
     >
       {sessions.map((session) => { const index = channels.indexOf(session); return <div key={session.id}><ErrorBoundary label={`Channel ${index + 1}`}><SessionTile session={session} index={index} /></ErrorBoundary></div>; })}
     </GridLayout>}
