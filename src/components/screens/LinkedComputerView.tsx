@@ -13,7 +13,6 @@ import { useWorkspaceStore } from '../../state/workspace-store';
 import { CHANNEL_STATES } from '../../state/channel-state';
 import { LinkedScreen } from './LinkedScreen';
 import { LinkedHistory } from './LinkedHistory';
-import { LinkedTipStrip } from '../tile/LiveTipStrip';
 import { ENGINE_ICONS } from '../tile/engine-icons';
 
 /**
@@ -132,7 +131,6 @@ function LinkedTile({ computer, channel }: { computer: LinkedComputer; channel: 
       ? <LinkedChat computer={computer} channel={channel} engine={channel.engine} />
       : <div className="terminal-frame linked-frame"><div ref={container} className="terminal-viewport linked-viewport" role="region" aria-label={`${ENGINE_NAME[channel.engine]} terminal on ${computer.name}`} />
         {conversation && <div className="transcript-overlay"><TranscriptView agent={ENGINE_NAME[channel.engine]} where={computer.name} load={() => workbench<ChannelTranscript>({ action: 'linked-transcript', id: computer.id, sessionId: channel.sessionId })} /></div>}</div>}
-    {channel.coaching && <LinkedTipStrip computerId={computer.id} computerName={computer.name} coaching={channel.coaching} />}
   </article>;
 }
 

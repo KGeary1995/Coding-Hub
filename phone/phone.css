@@ -238,13 +238,6 @@ body.offline .terminal, body.offline .keys, body.offline .compose { opacity: 0.4
 .select-bar { position: fixed; left: calc(16px + env(safe-area-inset-left)); right: calc(16px + env(safe-area-inset-right)); top: calc(env(safe-area-inset-top) + 64px); z-index: 5; display: flex; align-items: center; gap: 8px; padding: 8px 8px 8px 12px; border: 1px solid var(--tr-line-strong); border-radius: var(--tr-r-overlay); background: var(--tr-surface); box-shadow: var(--tr-shadow-overlay); }
 .select-bar[hidden] { display: none; }
 .select-bar span { flex: 1; font: var(--tr-t-control); }
-/* Live coaching on the prompt last sent. */
-.coach { padding: 12px; border: 1px solid var(--tr-accent-line); border-radius: var(--tr-r-control); background: var(--tr-accent-soft); font: 400 13px/20px var(--tr-font-ui); }
-.coach[hidden] { display: none; }
-.coach p { margin: 0 0 4px; }
-.coach summary { cursor: pointer; color: var(--tr-fg-muted); }
-.coach pre { margin: 4px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; font: var(--tr-t-meta); }
-.coach-actions { display: flex; gap: 8px; justify-content: flex-end; }
 
 /* Copy text, and a channel's whole conversation: a sheet over the page, where the phone's own selection works. */
 .copy-sheet { position: fixed; inset: 0; z-index: 50; display: flex; flex-direction: column; gap: 8px; padding: max(12px, env(safe-area-inset-top)) calc(16px + env(safe-area-inset-right)) max(16px, env(safe-area-inset-bottom)) calc(16px + env(safe-area-inset-left)); background: var(--tr-bg); }

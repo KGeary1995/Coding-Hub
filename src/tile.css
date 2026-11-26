@@ -269,15 +269,6 @@
 .task-strip-title { flex: 1 1 auto; min-width: 64px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .task-strip .muted { font-size: 12px; white-space: nowrap; }
 .task-strip .error-message { flex: 0 1 auto; min-width: 0; margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-/* Live coaching under a channel: quiet, outside the terminal, at most a few lines before it scrolls. */
-.live-tip { flex-shrink: 0; display: flex; align-items: flex-start; gap: 8px; max-height: 132px; overflow-y: auto; padding: 4px 12px; border-top: 1px solid var(--tr-line-faint); color: var(--tr-fg-muted); font: 400 12px/20px var(--tr-font-ui); }
-.live-tip-icon { flex: none; width: 14px; height: 24px; color: var(--tr-accent); }
-.live-tip-body { flex: 1; align-self: safe center; min-width: 0; }
-.live-tip-body p { margin: 0; overflow-wrap: anywhere; }
-.live-tip-body p + p, .live-tip-body details { margin-top: 4px; }
-.live-tip-body summary { font: 500 12px/20px var(--tr-font-ui); color: var(--tr-fg-dim); }
-.live-tip-body pre { margin: 4px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; font: 400 12px/20px var(--tr-font-mono); color: var(--tr-fg); }
-.live-tip-actions { flex: none; display: flex; align-items: center; gap: 4px; }
 /* Pasted images: Trace's view of what the person pasted; the CLI attaches its own copy. */
 .pasted-images { flex-shrink: 0; display: flex; align-items: flex-end; gap: 12px; padding: 4px 12px 8px; border-top: 1px solid var(--tr-line-faint); }
 /* In a narrow tile the attached group gives way (its heading shortens, its images scroll); the sent group keeps room
