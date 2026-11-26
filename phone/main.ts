@@ -626,7 +626,6 @@ function showChannel(sessionId: string) {
   }
   const title = h('span', { className: 'title', id: 'channel-title' });
   const waiting = h('p', { id: 'waiting', className: 'banner waiting', hidden: true, aria: { role: 'status' } });
-  const coach = h('div', { id: 'coach', className: 'coach', hidden: true, aria: { role: 'status', label: 'Prompt coaching' } });
   const output = h('div', { id: 'output', className: 'terminal', aria: { label: 'Channel output' } });
   const problem = h('p', { id: 'send-error', className: 'error', aria: { role: 'alert' } });
   const sendingLine = h('p', { id: 'sending', className: 'dim sending', hidden: true, aria: { role: 'status' } }, 'Sending…');
@@ -656,7 +655,7 @@ function showChannel(sessionId: string) {
   // Touching anything in the channel (the screen, the keys, the message box) is using it.
   const selected = h('div', { className: 'select-bar', hidden: true, aria: { role: 'toolbar', label: 'Selected text' } });
   const computerSize = h('p', { id: 'computer-size', className: 'dim computer-size', hidden: true, aria: { role: 'status' } }, 'Shown at the computer’s size, where it was last used. Touch the screen to bring it to this phone.');
-  app.replaceChildren(header(showList, title, switcherButton(), ...(channel ? [controlsBox(channel)] : [])), h('main', { className: 'channel-view', onpointerdown: useChannel }, waiting, coach, computerSize, output, selected, problem, sendingLine, extra, tools, keys, form));
+  app.replaceChildren(header(showList, title, switcherButton(), ...(channel ? [controlsBox(channel)] : [])), h('main', { className: 'channel-view', onpointerdown: useChannel }, waiting, computerSize, output, selected, problem, sendingLine, extra, tools, keys, form));
   terminal = new Terminal({ cols: channel?.cols ?? 80, rows: channel?.rows ?? 24, fontFamily: TERMINAL_FONT, fontSize: textSize, lineHeight: 1.2, scrollback: 3000, cursorBlink: false, allowProposedApi: true,
     theme: { ...TERMINAL_THEME, cursor: channel ? ENGINE_CURSOR[channel.engine] : TERMINAL_THEME.cursor } });
   measureLikeTheCLIs(terminal); fit = new FitAddon(); terminal.loadAddon(fit);
@@ -815,26 +814,6 @@ async function showConversation(sessionId: string) {
   } catch (error) { status.textContent = ''; body.append(h('p', { className: 'error', aria: { role: 'alert' } }, (error as Error).message)); }
 }
 
-/** Live coaching on the prompt last sent in the channel, as on the desktop, with Ask AI for a channel on the computer this phone talks to. */
-let coachAsking: string | null = null; let coachDismissed: string | null = null; let coachError = '';
-function renderCoach(channel: RemoteChannel) {
-  const box = document.getElementById('coach'); if (!box) return;
-  const tip = channel.coaching; if (!tip || coachDismissed === tip.id) { box.hidden = true; return; }
-  box.hidden = false;
-  // This computer's own channels carry its name too (remote-server stamps them), so "own" is the same computer, not no
-  // computer: with no computer name the button never showed (before 1.31.4).
-  const ask = !tip.review && (!channel.computer || channel.computer.id === me?.computer) && h('button', { className: 'quiet', disabled: coachAsking === tip.id, onclick: async () => {
-    coachAsking = tip.id; coachError = ''; renderCoach(channel);
-    try { const response = await api('/api/coaching-review', { method: 'POST', body: JSON.stringify({ id: tip.id }) }); if (!response.ok) coachError = ((await response.json().catch(() => ({}))) as { error?: string }).error ?? 'The prompt could not be reviewed.'; }
-    catch (error) { coachError = (error as Error).message; }
-    finally { coachAsking = null; const now = channels.find((item) => item.sessionId === channel.sessionId); if (now) renderCoach(now); }
-  } }, coachAsking === tip.id ? 'Asking…' : 'Ask AI');
-  box.replaceChildren(
-    ...(tip.review ? [h('p', {}, tip.review.advice), h('details', {}, h('summary', {}, 'Suggested rewrite'), h('pre', {}, tip.review.rewrite))] : tip.tips.map((text) => h('p', {}, text))),
-    ...(coachError ? [h('p', { className: 'error' }, coachError)] : []),
-    h('div', { className: 'coach-actions' }, ...(ask ? [ask] : []), h('button', { className: 'quiet', onclick: () => { coachDismissed = tip.id; box.hidden = true; } }, 'Dismiss')));
-}
-
 function renderChannel() {
   const channel = channels.find((item) => item.sessionId === current); if (!channel) return;
   updateSwitcher();
@@ -844,7 +823,6 @@ function renderChannel() {
   const controls = document.getElementById('channel-controls'); if (controls && controls.dataset.key !== controlsKey(channel)) controls.replaceWith(controlsBox(channel));
   const waiting = document.getElementById('waiting');
   if (waiting) { waiting.hidden = !channel.attention; waiting.textContent = channel.attention ? `Waiting for you: ${channel.attention}` : ''; }
-  renderCoach(channel);
   // A chat has no screen to size or reset: its view follows the conversation itself.
   if (channel.chat) return;
   // A restarted channel is a new process: its screen starts afresh, as on the desktop, at the desktop's size until the phone's is granted.

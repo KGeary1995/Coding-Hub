@@ -6,7 +6,7 @@ export const DEFAULT_TITLES: Record<ChannelEngine, string> = { claude: 'Claude C
 /** Gemini channels were called "Gemini CLI" until 1.38.0 (now "Gemini", as "Claude Code" and "Codex" carry no CLI): still a default name. */
 export const isDefaultTitle = (engine: ChannelEngine, title: string) => title === DEFAULT_TITLES[engine] || (engine === 'gemini' && title === 'Gemini CLI');
 
-const folderName = (directory: string) => directory.split(/[\\/]/).filter(Boolean).at(-1) || directory;
+export const folderName = (directory: string) => directory.split(/[\\/]/).filter(Boolean).at(-1) || directory;
 
 /**
  * What a channel is called: the name the person gave it, or, while it still has its engine's default name, the folder

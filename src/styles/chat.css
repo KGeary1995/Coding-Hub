@@ -164,7 +164,10 @@
 .table-seats i { width: 14px; height: 14px; margin-left: -4px; border: 2px solid var(--tr-surface); border-radius: 50%; background: var(--tone); }
 .table-roles { color: var(--tr-fg-muted); }
 .table-partner, .table-tokens { color: var(--tr-fg-dim); font: 400 12px/16px var(--tr-font-ui); font-variant-numeric: tabular-nums; }
-.table-partner b, .table-tokens b { font-weight: 600; }
+/* Who runs in the background is the news, in bold; the token counts are a caption, so their names stay at the text's weight
+   (bold too, the bar read as one run of names: 1.47.0 review). */
+.table-partner b { font-weight: 600; }
+.table-tokens b { font-weight: 400; }
 /* A narrow tile's bar takes two lines, not three, in a four-tile grid on a small window. At 560 px or less the token
    counts leave it and Swap keeps only its icon; at 460 px or less who drives leaves too. What leaves stays in a
    tooltip (TableBar, ChainBar) and is still read out; Swap's label stays its name. */

@@ -98,8 +98,10 @@ export function UsageScreen() {
       </article>
       <aside className="ui-card span-4 tr-usage-side">
         <div className="ui-card-head"><ChartPie aria-hidden="true" /><h2>By engine · {windowLabel}</h2></div>
-        <div className="tr-split" aria-hidden="true">{byEngine.map((item) => <i key={item.name} className={item.name} style={{ flexGrow: item.tokens }} />)}</div>
-        <div className="ui-list">{byEngine.map((item) => <div key={item.name} className="ui-row tr-side-row"><span><i className={`tr-engine-square ${item.name}`} aria-hidden="true" />{ENGINE_LABEL[item.name]}</span><span className="tnum">{compact(item.tokens)} · {Math.round(item.tokens / engineTotal * 100)}%</span><span className="tnum">{dollars(item.cost)}</span></div>)}</div>
+        {/* With nothing counted, the bar was an empty track and every row read 0 · 0%. */}
+        {byEngine.some((item) => item.tokens > 0) ? <><div className="tr-split" aria-hidden="true">{byEngine.map((item) => <i key={item.name} className={item.name} style={{ flexGrow: item.tokens }} />)}</div>
+        <div className="ui-list">{byEngine.map((item) => <div key={item.name} className="ui-row tr-side-row"><span><i className={`tr-engine-square ${item.name}`} aria-hidden="true" />{ENGINE_LABEL[item.name]}</span><span className="tnum">{compact(item.tokens)} · {Math.round(item.tokens / engineTotal * 100)}%</span><span className="tnum">{dollars(item.cost)}</span></div>)}</div></>
+          : <div className="ui-empty"><ChartPie aria-hidden="true" /><h3>No tokens in this window</h3><p>Each engine’s share shows once one reports its use.</p></div>}
         {customAgents && <p className="ui-hint">Usage isn’t tracked for agents you added under Agent setup → Agents: their programs don’t report it in a form Trace can read.</p>}
         <h3>Context at last report</h3>
         <div className="ui-list"><div className="ui-row tr-side-row"><span>Sessions at 80% or more</span><span className={`ui-count ${totals.overContext ? 'limit' : 'neutral'}`}>{totals.overContext}</span></div>

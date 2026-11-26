@@ -45,7 +45,7 @@ export function OtherComputersCard() {
     <div><p className="ui-hint ui-help-line">They connect over Tailscale, and each link's key stays on this computer.<HelpTip label="Help: how computers find each other" text="Computers find each other on your tailnet and through the Drive sync folder." /></p>
     <p className="ui-hint">A phone paired with either computer sees the channels of both.</p></div>
     <label className="ui-check"><input type="checkbox" checked={remote?.autoLink ?? true} disabled={busy || !remote} onChange={(event) => { const enabled = event.target.checked; void act(async () => setRemote(await workbench<RemoteStatus>({ action: 'remote-auto-link', enabled }))); }} />Link my computers automatically</label>
-    <p className="ui-hint">Computers signed in to your Tailscale account ({remote?.tailscale.login ?? 'not known yet'}) link without a code when both have this on. Shared and tagged devices still need a code, and a computer you unlink stays unlinked until you link it with a code.</p>
+    <p className="ui-hint">Your computers on Tailscale ({remote?.tailscale.login ?? 'not known yet'}) link without a code when both have this on.</p>
     {!computers.length && <div className="ui-empty"><Monitor aria-hidden="true" /><h4>No other computers yet</h4><p>On each computer, turn on Phone access with Tailscale HTTPS; computers on your Tailscale account appear here within a minute.</p></div>}
     {computers.length > 0 && <ul className="ui-list linked-computers" aria-label="Other computers">{computers.map((computer) => <li key={computer.id} className="ui-row">
       <div className="ui-row-main"><strong>{computer.name}</strong>
@@ -77,14 +77,14 @@ export function OtherComputersCard() {
       {share.enabled && <label className="ui-check"><input type="checkbox" checked={share.elevated} disabled={busy} onChange={(event) => { const elevated = event.target.checked; void act(async () => setShare(await screen<ScreenShareStatus>({ action: 'screen-share-set', enabled: true, elevated }))); }} />Also control apps running as administrator</label>}
       {share.enabled && share.problem && <p className="ui-banner danger" role="alert"><TriangleAlert aria-hidden="true" /><span>{share.problem}</span></p>}
       {/* Who else can see and control this screen, and that it runs with Trace closed, stay in view. */}
-      <div><p className="ui-hint">A paired phone can see and control it too, once <strong>Can start and stop agents</strong> is on for it under Phone access.</p>
-      <p className="ui-hint">It works while Trace is closed: a small Trace service starts when you sign in to Windows. A Trace icon by the clock shows while someone is watching, with <strong>Disconnect</strong>.</p></div>
+      <div><p className="ui-hint">A paired phone with <strong>Can start and stop agents</strong> on can see and control it too.</p>
+      <p className="ui-hint">A Trace service starts when you sign in to Windows, so it works while Trace is closed.</p></div>
       {share.enabled && <p className="ui-banner warning"><TriangleAlert aria-hidden="true" /><span>{share.elevated ? 'A small helper presses keys and moves the mouse as administrator every time you sign in, without asking (a scheduled task starts it). It runs from Program Files\\Trace Input, which only administrators can change, and does nothing but press keys and move the mouse. Anyone viewing this screen also controls apps running as administrator, and any program running as you can send the helper keys and clicks too. Windows prompts and the lock screen still cannot be controlled. Turning this off asks Windows’ permission again to remove the helper.' : 'Windows lets only a program running as administrator control apps that run as administrator. Turning this on asks Windows’ permission once (an administrator account is needed). The cost: a part of the service then runs as administrator at every sign-in without asking, from a folder your account can change, so any program running as you could get administrator rights without Windows asking; and anyone viewing this screen controls apps running as administrator.'}</span></p>}
       {share.enabled && <p className="ui-hint">{share.running ? 'Sharing: the service is running.' : 'The service is not running. Turn this off and on again.'}</p>}
       {!ready && !share.enabled && <p className="ui-hint">Set up Phone access with Tailscale HTTPS above first.</p>}
     </section>}
     {/* What is only how to: what each computer needs, kept closed until asked for (docs/design/midnight, section 7). */}
-    <HowThisWorks><p>The other computer reaches this one the same way your phone does.</p>{share?.supported && <p>To share this screen, this computer must be on, awake and unlocked.</p>}</HowThisWorks>
+    <HowThisWorks><p>The other computer reaches this one the same way your phone does. Shared and tagged devices still need a code, and a computer you unlink stays unlinked until you link it with a code.</p>{share?.supported && <p>To share this screen, this computer must be on, awake and unlocked. A Trace icon by the clock shows while someone is watching, with <strong>Disconnect</strong>.</p>}</HowThisWorks>
     {error && <p role="alert" className="ui-banner danger"><CircleAlert aria-hidden="true" /><span>{error}</span></p>}
   </article>;
 }

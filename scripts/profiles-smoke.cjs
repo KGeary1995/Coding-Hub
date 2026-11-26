@@ -53,7 +53,7 @@ const { NO_DRIVE } = require('./lib/no-drive.cjs');
       assert.equal(status.find((item) => item.provider === 'claude').state, 'authenticated');
       assert.equal(await fs.readFile(path.join(root, 'storage/claude-profiles', profile.id, 'fixture-authenticated'), 'utf8'), 'fixture-only');
     }
-    await page.getByRole('button', { name: 'Back to channels', exact: true }).click();
+    await openView(page, 'Workspace');
     await app.evaluate(({ dialog }, directory) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [directory] }); }, project);
     await page.getByRole('button', { name: 'Open project', exact: true }).click();
     await addChannel(page, 'Claude Code');

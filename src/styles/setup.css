@@ -158,3 +158,10 @@
 .agent-form textarea, .agent-json { font-family: var(--tr-font-mono); font-size: 12px; }
 .agent-test pre { max-height: 220px; overflow: auto; margin: 4px 0 10px; padding: 8px 10px; border-radius: var(--tr-r-inset); background: var(--tr-well); white-space: pre-wrap; font: 12px/1.45 var(--tr-font-mono); }
 .agent-form .session-error ul { margin: 0; padding-left: 18px; }
+
+/* Skills & plugins, Install from GitHub: each field's label above it, the fields and Preview on one line, the hint under
+   them all. Unstyled, the labels ran into their fields and the hint ran on from Preview (found in the 1.47.0 review). */
+.plugin-install { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr) auto; align-items: end; gap: 8px 12px; margin-top: 12px; }
+.plugin-install label { display: flex; flex-direction: column; gap: 4px; min-width: 0; font: 500 12px/16px var(--tr-font-ui); color: var(--tr-fg-dim); }
+.plugin-install .ui-hint { grid-column: 1 / -1; }
+@media (max-width: 900px) { .plugin-install { grid-template-columns: minmax(0, 1fr) auto; } .plugin-install label:first-child { grid-column: 1 / -1; } }

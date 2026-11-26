@@ -32,7 +32,6 @@ import { CHANNEL_STATES, channelState, channelTokensToday, limitRatio, usageFor 
 import { ScopeStrip } from './tile/ScopeStrip';
 import { EngineAvatar } from './tile/EngineAvatar';
 import { useAgentLook } from '../state/agent-store';
-import { LiveTipStrip } from './tile/LiveTipStrip';
 import { TaskStrip } from './tile/TaskStrip';
 import { errorLines, errorText, setupTarget, SETUP_TARGETS, useErrorStrip } from './tile/error-strip';
 import { useTerminalRow } from './tile/terminal-row';
@@ -234,7 +233,6 @@ export const SessionTile = memo(function SessionTile({ session, index }: { sessi
       </div>}</div>
       {scope('foot')}
       {tasked && <TaskStrip sessionId={session.id} />}
-      {tasked && <LiveTipStrip sessionId={session.id} />}
       {!chat && <PastedImages sessionId={session.id} />}
     </article>
   );

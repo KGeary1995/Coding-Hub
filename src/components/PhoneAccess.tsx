@@ -3,6 +3,8 @@ import qrcode from 'qrcode-generator';
 import { CircleAlert, Smartphone, X } from 'lucide-react';
 import type { RemoteRequest, RemoteStatus, ServeProblem } from '../../shared/remote';
 import { workbench } from '../runtime/workbench';
+import { HelpTip } from './HelpTip';
+import { HowThisWorks } from './HowThisWorks';
 
 /** A QR code drawn as SVG cells, dark on light so phone cameras read it in either theme. */
 function QrCode({ text, label }: { text: string; label: string }) {
@@ -71,7 +73,7 @@ export function PhoneAccessCard() {
   return <article className="storage-card ui-card settings-card phone-access" aria-labelledby="phone-access-title">
     {head(!status.enabled ? 'Off' : ready ? 'Ready' : status.listening ? 'Needs Tailscale' : 'Not running', tone)}
     <p>Read and type into your channels from your phone, answer approvals, and get alerts.</p>
-    <p className="ui-hint">Your phone reaches this computer through Tailscale, a private network for your own devices; nothing is opened to the internet. Each phone must also be paired here, and can be removed at any time.</p>
+    <p className="ui-hint ui-help-line">Phones connect through Tailscale, your private network; nothing is opened to the internet.<HelpTip label="Help: how a phone connects" text="Tailscale is a private network for your own devices. Each phone must also be paired here, and can be removed at any time." /></p>
     <label className="ui-check"><input type="checkbox" checked={status.enabled} disabled={busy} onChange={(event) => { const enabled = event.target.checked; setStatus({ ...status, enabled }); void run({ action: 'remote-enable', enabled }); }} />Allow paired phones to read and type into channels</label>
     {status.error && <p role="alert" className="ui-banner danger"><CircleAlert aria-hidden="true" /><span>{status.error}</span></p>}
     {status.enabled && <>
@@ -103,7 +105,9 @@ export function PhoneAccessCard() {
         <label className="ui-check"><input type="checkbox" checked={device.canRun} disabled={busy} onChange={(event) => void run({ action: 'remote-can-run', id: device.id, canRun: event.target.checked })} />Can start and stop agents</label>
       </li>)}</ul>}
       {/* Said once under the list, not in every phone's row: it is the same for each. */}
-      {phones.length > 0 && <p className="ui-hint">Can start and stop agents lets a phone start, stop, restart and add channels, and, on Windows with Share this screen on, see and control this screen (turning it off closes that at once). Either way, a paired phone can type into running channels, answer approvals, write handoff notes to shared memory and ask for a coaching review. Removing a phone still locks it out at once.</p>}
+      {phones.length > 0 && <><div><p className="ui-hint">Any paired phone can type into channels and answer approvals. Remove locks it out at once.</p>
+      <p className="ui-hint">Can start and stop agents also lets it add and stop channels and, on Windows, control this screen.</p></div>
+      <HowThisWorks><p>Can start and stop agents lets a phone start, stop, restart and add channels, and, on Windows with Share this screen on, see and control this screen (turning it off closes that at once). Either way, a paired phone can type into running channels, answer approvals, write handoff notes to shared memory and ask for a coaching review.</p></HowThisWorks></>}
     </>}
     {error && <p role="alert" className="ui-banner danger"><CircleAlert aria-hidden="true" /><span>{error}</span></p>}
   </article>;

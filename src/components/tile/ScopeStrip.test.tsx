@@ -10,6 +10,8 @@ describe('a channel’s footer', () => {
     expect(head).toContain('in-head'); expect(head).toContain('<b class="tr-foot-value ">41%</b>'); expect(head).toContain('</b> tok</span>'); expect(head).not.toContain('tok today');
     expect(head).toContain('tr-scope-trace'); expect(head).not.toContain('chars/s</span>'); expect(head).toContain('Terminal output over the last two minutes');
     expect(strip({ tokens: 5 })).toContain('in-foot');
+    // An amount in context has no meter to name it: in the header it is followed by "ctx", not left a bare number.
+    expect(strip({ contextUsed: 145, tokens: 250, engine: 'claude', place: 'head' })).toContain('<b class="tr-foot-value">145</b> ctx</span>');
   });
   it('draws a share as a meter with its percentage, named by the meter', () => {
     const html = strip({ limit: 0.13, tokens: 105 });

@@ -39,7 +39,7 @@ export function UpdatesPanel() {
     {error && <p role="alert" className="ui-banner danger"><CircleAlert aria-hidden="true" /><span>{error}</span></p>}
     {!disabled && <>
       <label className="ui-check"><input type="checkbox" checked={status!.automaticChecks} disabled={working} onChange={(event) => void run({ action: 'automatic', enabled: event.target.checked })} />Automatically check for stable releases</label>
-      <p className="ui-hint">Checks run after startup and every four hours. Downloads and installation require your action. Checks contact GitHub; workspace files and channel content are never included.</p>
+      <p className="ui-hint">Checks contact GitHub every four hours, without your files or channels. You choose when to install.</p>
       {status?.lastChecked && <small className="ui-hint">Last check: {new Date(status.lastChecked).toLocaleString()}</small>}
       {status?.phase === 'downloading' && <progress className="ui-meter accent" aria-label="Update download progress" max={100} value={status.progress ?? undefined} />}
     </>}
@@ -49,6 +49,6 @@ export function UpdatesPanel() {
       {!disabled && (status?.phase === 'ready' || (status?.phase === 'error' && status.progress === 100)) && <button className="button primary" disabled={working} onClick={() => void run({ action: 'install' })}>Restart and install</button>}
       {window.codingHub && <button className="button secondary" disabled={busy} title="The Windows installer and the Mac disk images for every release" onClick={() => void run({ action: 'downloads' })}><ExternalLink size={16} />Open downloads page</button>}
     </div>
-    <p className="ui-hint">Stop all channels before installing. Settings, rules, memory, and logs are stored separately in <code>~/.coding-hub</code> and retained across upgrades.</p>
+    <p className="ui-hint">Stop all channels before installing. Your data in <code>~/.coding-hub</code> is kept across upgrades.</p>
   </article>;
 }

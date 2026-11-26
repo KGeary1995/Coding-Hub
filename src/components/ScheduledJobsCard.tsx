@@ -7,6 +7,7 @@ import { useWorkspaceStore } from '../state/workspace-store';
 import { lookOf, useAgentStore } from '../state/agent-store';
 import type { AgentEntry } from '../../shared/agents';
 import { ConfirmStep } from './ConfirmStep';
+import { HowThisWorks } from './HowThisWorks';
 
 type Engine = ScheduledJob['engine'];
 export const JOB_AGENTS: Record<Exclude<Engine, 'custom'>, string> = { claude: 'Claude Code', codex: 'Codex', gemini: 'Gemini' };
@@ -55,7 +56,8 @@ export function ScheduledJobsCard() {
   return <section className="ui-card scheduled-jobs" aria-labelledby="scheduled-jobs-title">
     <div className="ui-card-head"><AlarmClock aria-hidden="true" /><h2 id="scheduled-jobs-title">Scheduled jobs</h2><span className={`ui-count ${data.jobs.length ? 'accent' : 'neutral'}`}>{data.jobs.length}</span>
       {!open && <button type="button" className="button secondary small" onClick={() => { setForm({ ...EMPTY, directory: rootDirectory ?? '' }); setOpen(true); }}><Plus aria-hidden="true" />New scheduled job</button>}</div>
-    <p className="ui-hint">An agent does a job by itself at the times you choose, such as every morning. Each run opens a new channel in the job’s folder and appears on this board as a task. Trace must be running at that time: closing its window keeps it running in the tray. A run that was missed while Trace was closed runs when Trace opens, if it was due in the last 12 hours. When a new run starts, the channel of the job’s last run is closed once that run’s task is finished.</p>
+    <p className="ui-hint">An agent works by itself at the times you choose. Trace must be running then; the tray counts.</p>
+    <HowThisWorks><p>Each run opens a new channel in the job’s folder and appears on this board as a task. Closing Trace’s window keeps it running in the tray. A run missed while Trace was closed runs when Trace opens, if it was due in the last 12 hours. When a new run starts, the channel of the job’s last run is closed once that run’s task is finished.</p></HowThisWorks>
     {error && <p className="error-message" role="alert">{error}</p>}
     {data.jobs.length > 0 && <ul className="ui-list">{data.jobs.map((job) => <li key={job.id} className="ui-row scheduled-job">
       <span className="ui-row-main"><strong>{job.name}</strong>
