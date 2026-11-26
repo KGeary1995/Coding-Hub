@@ -90,9 +90,9 @@ export async function askForHandoff(sessionId: string, wait = 1500): Promise<boo
   const sessions = useWorkspaceStore.getState().sessions; const session = sessions.find((item) => item.id === sessionId); if (!session?.runId) return false;
   const lead = tableLeadOf(sessions, session); if (lead) return tableHandoff(session, lead);
   const usage = usageFor(session, useHubStore.getState().usage); const runId = session.runId;
-  if (await compactAfterHandoff(session, sessions)) return false;
-  // Back under the limit (compacted): the next climb asks again.
+  // Back under the limit (compacted, by Trace or by hand): nothing is left to compact, and the next climb asks again.
   if (contextShare(usage) < LIMIT_THRESHOLD) { asked.delete(runId); waiting.delete(runId); settle(session, runId); return false; }
+  if (await compactAfterHandoff(session, sessions)) return false;
   if (asked.has(runId) || !handoffDue(session, sessions, usage, useHubStore.getState().preferences)) return false;
   asked.add(runId); waiting.set(runId, { at: Date.now(), turns: 0 }); const text = handoffRequest(Math.round(contextShare(usage) * 100));
   if (isChatEngineConfig(session.config) && session.config.chat && window.codingHub) {

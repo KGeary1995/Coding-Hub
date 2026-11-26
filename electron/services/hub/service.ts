@@ -103,6 +103,8 @@ export class HubService {
       case 'drive-conflicts': return this.drive.conflicts(request.project);
       case 'drive-resolve': await this.drive.resolve(request.project, request.id, request.localHash, request.remoteHash); return null;
       case 'drive-sync': this.projects.add(request.project); return this.drive.syncLater(request.project);
+      // This computer's Git origins are read first (in the background), so its own projects are not offered to clone.
+      case 'synced-projects': return this.devices.syncedProjects();
       default: return this.execute(request);
     }
   }
@@ -117,7 +119,7 @@ export class HubService {
       case 'add-server': this.configs.add(request); return null;
       case 'memory-key': return projectMemoryKey(request.directory);
       // Git and the Drive folder are read asynchronously: the IPC handler awaits them (see executeAsync).
-      case 'memory-commits': case 'memory-list': case 'memory-projects': case 'drive-conflicts': case 'drive-resolve': case 'drive-sync': throw new HubError('HUB_ASYNC', `${request.action} is answered by executeAsync.`);
+      case 'memory-commits': case 'memory-list': case 'memory-projects': case 'drive-conflicts': case 'drive-resolve': case 'drive-sync': case 'synced-projects': throw new HubError('HUB_ASYNC', `${request.action} is answered by executeAsync.`);
       // The note is saved here at once; Drive gets it in the background (offline notes sync on the next retry).
       case 'memory-write': { const note = this.memory.write(request.project, request.title, request.content, request.author, request.supersedes); this.trackProject(request.project); return note; }
       // One Drive sync per project for the lot. Notes saved before a failure stay saved, and the message says how many.
@@ -149,7 +151,6 @@ export class HubService {
       case 'device-sync-status': return this.devices.status();
       // Sync now publishes this computer's usage at once; the 30-second tick does so at most every few minutes.
       case 'device-sync-now': return this.devices.sync(true);
-      case 'synced-projects': return this.devices.syncedProjects();
       case 'device-sync-resolve': return this.devices.resolve(request.document, request.keep);
       case 'drive-status': return this.drive.status();
       case 'drive-connect': return this.drive.status();

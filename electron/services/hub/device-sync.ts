@@ -283,9 +283,11 @@ export class DeviceSync {
     for (const id of this.remoteProjects.keys()) if (!present.has(id)) this.remoteProjects.delete(id);
   }
   /** The other computers' projects that this one has not opened (by repository), newest computer's first, each once. */
-  syncedProjects(): SyncedProject[] {
+  async syncedProjects(): Promise<SyncedProject[]> {
     // Sync turned off: what was read before is not offered.
     try { if (!this.preferences().syncDevices) return []; } catch { return []; }
+    // This computer's origins known first: a project open here is not offered while its origin is still being read.
+    this.localProjects(); await this.remotesRead();
     const here = new Set(this.localProjects().map((item) => item.repository.toLowerCase())); const out: SyncedProject[] = [];
     for (const { projects } of this.remoteProjects.values()) for (const project of projects) if (!here.has(project.repository.toLowerCase()) && !out.some((item) => item.repository.toLowerCase() === project.repository.toLowerCase())) out.push(project);
     return out;

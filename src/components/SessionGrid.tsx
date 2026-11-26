@@ -53,7 +53,8 @@ export function SessionGrid() {
       draggableCancel="button,input,select,.terminal-viewport"
       compactType="vertical"
       resizeHandles={['se']}
-      onLayoutChange={(next) => { const moved = next.map(({ i, x, y, w, h, minW, minH }) => ({ sessionId: i, x, y, w, h, minW: minW ?? 3, minH: minH ?? 10 })); setTiles(filtered ? mergeTiles(tiles, moved) : moved); }}
+      // Not saved while the worktrees are unknown: a worktree's channel would count as another project's and go below.
+      onLayoutChange={(next) => { if (filtered && !useWorktrees.getState().loaded) return; const moved = next.map(({ i, x, y, w, h, minW, minH }) => ({ sessionId: i, x, y, w, h, minW: minW ?? 3, minH: minH ?? 10 })); setTiles(filtered ? mergeTiles(tiles, moved) : moved); }}
     >
       {sessions.map((session) => { const index = channels.indexOf(session); return <div key={session.id}><ErrorBoundary label={`Channel ${index + 1}`}><SessionTile session={session} index={index} /></ErrorBoundary></div>; })}
     </GridLayout>}

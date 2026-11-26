@@ -2,7 +2,7 @@ import { create } from 'zustand';
 import type { GridTile, Session } from '../../shared/types';
 import type { ManagedWorktree } from '../../shared/project-tools';
 import { channelDirectory } from './channel-names';
-import { arrangeTiles, standArranged, useWorkspaceStore, type LayoutMode } from './workspace-store';
+import { arrangeTiles, channelsOf, standArranged, useWorkspaceStore, type LayoutMode } from './workspace-store';
 
 /**
  * Several projects (step 6, docs/plans/several-projects.md; the owner's choice of 2026-11-25: the grid shows the active
@@ -18,9 +18,15 @@ export const useAllProjects = create<{ on: boolean }>(() => ({ on: false }));
  * a maximised channel of another project is not kept so (it is hidden, but notices and jumps went by it).
  */
 export function setAllProjects(on: boolean) {
-  useAllProjects.setState({ on }); const state = useWorkspaceStore.getState(); state.arrange(state.layoutMode);
-  const focused = !on && state.sessions.find((session) => session.id === state.focusedSessionId); if (focused && !inActiveProject(focused, state.rootDirectory, useWorktrees.getState().list)) useWorkspaceStore.setState({ focusedSessionId: null });
+  useAllProjects.setState({ on }); const state = useWorkspaceStore.getState(); state.arrange(state.layoutMode); if (!on) unfocusHidden();
 }
+/** A maximised channel the grid does not show (another project's; also one restored so) is not kept maximised. */
+function unfocusHidden() {
+  const state = useWorkspaceStore.getState(); if (!state.focusedSessionId || useAllProjects.getState().on) return;
+  if (!shownChannels(channelsOf(state.sessions), state.rootDirectory, useWorktrees.getState().list).some((session) => session.id === state.focusedSessionId)) useWorkspaceStore.setState({ focusedSessionId: null });
+}
+// Once the worktrees are known, which channels show is known: a channel restored maximised but hidden is not kept so.
+useWorktrees.subscribe((state, previous) => { if (state.loaded && !previous.loaded) unfocusHidden(); });
 /** Opens a project, ending All projects even when it is the one open (setRootDirectory's own change ends it otherwise). */
 export function openProject(directory: string) { if (useAllProjects.getState().on) setAllProjects(false); useWorkspaceStore.getState().setRootDirectory(directory); }
 /** A folder's last part: the name a project goes by in the project menu. */

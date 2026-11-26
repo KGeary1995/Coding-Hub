@@ -75,6 +75,9 @@ describe('All projects (the project menu)', () => {
     // Turned off with another project's channel maximised: not kept so; one of the open project stays.
     useWorkspaceStore.setState({ rootDirectory: '/code/alpha', sessions, focusedSessionId: 'b' }); setAllProjects(true); setAllProjects(false); expect(useWorkspaceStore.getState().focusedSessionId).toBeNull();
     useWorkspaceStore.setState({ focusedSessionId: 'a' }); setAllProjects(true); setAllProjects(false); expect(useWorkspaceStore.getState().focusedSessionId).toBe('a');
+    // Restored maximised but in another project: not kept so once the worktrees are known (which channels show is known then).
+    useWorktrees.setState({ list: [], loaded: false }); useShownChannels.setState({ settled: null }); useWorkspaceStore.setState({ focusedSessionId: 'b' });
+    useWorktrees.setState({ list: [], loaded: true }); expect(useWorkspaceStore.getState().focusedSessionId).toBeNull();
     // Opening the project already open ends All projects too.
     setAllProjects(true); openProject('/code/alpha'); expect(useAllProjects.getState().on).toBe(false);
     useWorkspaceStore.getState().setRootDirectory('/code/beta');

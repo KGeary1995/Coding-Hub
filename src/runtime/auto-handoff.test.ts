@@ -76,6 +76,16 @@ describe('a chat channel’s automatic handoff', () => {
     await askForHandoff('c2', 0); await askForHandoff('c2', 0); await askForHandoff('c2', 0);
     expect(chats.filter((request) => request.action === 'compact')).toHaveLength(1); expect(useHandoffStore.getState().bySession.c2.phase).toBe('saved');
   });
+  it('does not compact again a channel compacted by hand after a busy refusal', async () => {
+    const chats: Record<string, unknown>[] = [];
+    vi.stubGlobal('window', { codingHub: { chat: async (request: Record<string, unknown>) => { chats.push(request); return request.action === 'compact' ? { ok: false, error: { code: 'CHAT_BUSY', message: 'busy' } } : { ok: true, value: null }; }, hub: async (request: { action: string }) => ({ ok: true, value: request.action === 'memory-key' ? 'k' : [{ author: 'claude', createdAt: new Date(Date.now() + 1000).toISOString() }] }) } });
+    const one = session({ id: 'c3', runId: 'rc3', config: { engine: 'claude', chat: true, model: '', thinking: { budget_tokens: null }, tokenLimits: { maxOutputTokens: null, maxSessionTokens: null } } });
+    const at = (used: number) => useHubStore.setState({ usage: [{ ...usage(used, 1_000_000), sessionId: 'c3', runId: 'rc3' }], preferences: {} } as never);
+    useWorkspaceStore.setState({ sessions: [one], rootDirectory: '/p' } as never); at(850_000);
+    await askForHandoff('c3', 0); await askForHandoff('c3', 0); expect(chats.filter((request) => request.action === 'compact')).toHaveLength(1);
+    // The person compacted it: the next turn's end sends nothing more.
+    at(40_000); await askForHandoff('c3', 0); expect(chats.filter((request) => request.action === 'compact')).toHaveLength(1);
+  });
 });
 
 describe('a Round Table seat’s automatic handoff (1.47)', () => {
