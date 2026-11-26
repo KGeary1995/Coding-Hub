@@ -1,5 +1,20 @@
 ## What's new
 
+1.48.0 tidies Trace's design after a full review, and keeps coaching tips on the AI coaching page instead of under each channel.
+
+- **Live coaching tips are listed on AI coaching only.** They no longer show under each channel, on a linked computer's tab or on the phone; the checks still run on this computer, as before.
+- **Shorter cards.** Settings, Event hooks, Sync, Phone, Other computers, Updates, Backup, Scheduled jobs, Accounts, Shared rules, Shared memory, Projects, MCP and skills, and AI coaching say what a card does in one line, with the details under **How this works** or a help mark. Warnings that protect you are kept. Trace plugins' notice is a warning banner.
+- **Mac forms on a Mac.** Shortcuts show Cmd (Cmd ⇧ P for the command menu, Cmd O, Cmd ⇧ N), and folder fields show Mac paths as their examples.
+- **Smaller fixes:**
+  - The **Needs you** list has a heading with its count.
+  - Files, Changes, Session history and Accounts have one **Refresh** button and no extra Back button.
+  - A channel's header shows "ctx" after its context amount.
+  - A channel's state badge stays centred.
+  - **Usage** says when no engine used tokens in the window.
+  - Trace plugins' **Install from GitHub** row lines up.
+  - Scheduled jobs use the page's full width.
+- **For developers:** flaky unit tests fixed. An auto-memory test waited a fixed time instead of for its Git baseline, and the heavy Git and process tests get 60 seconds. Vitest no longer collects agents' worktrees under `.claude/`.
+
 1.47.0 brings the automatic handoff to Round Tables, makes Start in order's first request safe with Codex's startup questions, stops Windows channels completely, and prepares chats to keep running after Trace closes.
 
 - **The automatic handoff now covers Round Table seats.** Near the end of its context, a Claude Code, Codex or Gemini seat at a discussion table is asked for its handoff on its own once the table rests, and compacted once it is saved. Nothing of that turn goes to the other seats, and a message you send meanwhile waits for it. A Gemini seat now reports how full its context is, and is compacted with agy's own compact command. A hidden seat shows on its lead's tile and in Needs you. Not tried yet with real agents at a table.
