@@ -4,6 +4,7 @@ import type { PluginBrowseItem, PluginData, PluginPreview, PluginRun, PluginSumm
 import { workbench } from '../runtime/workbench';
 import { ConfirmStep } from './ConfirmStep';
 import { HowThisWorks } from './HowThisWorks';
+import { MOD_KEY } from './platform';
 
 const PERMISSION_WORDS: Record<PluginSummary['permissions'][number], string> = { 'channels.read': 'read channels', 'channels.send': 'message channels', 'channels.control': 'start, stop and add channels', tasks: 'read and add tasks', notify: 'show notices' };
 const sourceWords = (plugin: PluginSummary) => plugin.source.kind === 'folder' ? `Linked folder: ${plugin.source.path}` : `GitHub: ${plugin.source.repo}${plugin.source.ref ? ` (${plugin.source.ref})` : ''} at ${plugin.source.commit.slice(0, 8)}`;
@@ -30,7 +31,7 @@ export function TracePlugins() {
   return <article className="ui-card trace-plugins" aria-labelledby="trace-plugins-title">
     <div className="ui-card-head"><Puzzle aria-hidden="true" /><h2 id="trace-plugins-title">Trace plugins</h2><span className="ui-badge neutral">{data.plugins.length}</span><div className="ui-card-actions"><button type="button" className="button secondary small" disabled={busy} onClick={() => void act({ action: 'plugin-check' })}><RefreshCw size={13} aria-hidden="true" />Check for updates</button><button type="button" className="button secondary small" disabled={busy} onClick={() => void link()}><FolderOpen size={13} aria-hidden="true" />Link a folder</button></div></div>
     <p className="ui-banner warning"><TriangleAlert aria-hidden="true" /><span>Plugins run as you, on this computer, and nobody reviews them: add only ones you trust.</span></p>
-    <HowThisWorks><p>Plugins add actions to the command menu and run on events in Trace.</p><p>A plugin is a folder with a <code>trace-plugin.json</code> manifest and the programs it names. Before it is added, a system dialog shows every command it may run and what it may ask Trace to do. Its actions are in the command menu (Ctrl+Shift+P) as <em>plugin name: action</em>, and its event commands run when a channel needs you, ends its turn, fails, starts or stops, a task is ready for review, a worktree is made, or Trace starts. Turning a plugin off stops its programs at once.</p></HowThisWorks>
+    <HowThisWorks><p>Plugins add actions to the command menu and run on events in Trace.</p><p>A plugin is a folder with a <code>trace-plugin.json</code> manifest and the programs it names. Before it is added, a system dialog shows every command it may run and what it may ask Trace to do. Its actions are in the command menu ({MOD_KEY}+Shift+P) as <em>plugin name: action</em>, and its event commands run when a channel needs you, ends its turn, fails, starts or stops, a task is ready for review, a worktree is made, or Trace starts. Turning a plugin off stops its programs at once.</p></HowThisWorks>
     <form className="plugin-install" onSubmit={(e) => { e.preventDefault(); if (repo.trim()) void fetchPreview(repo, ref); }}>
       <label>Install from GitHub<input aria-label="GitHub repository" placeholder="owner/repo or owner/repo/folder" value={repo} onChange={(e) => setRepo(e.target.value)} /></label>
       <label>Branch, tag or commit<input aria-label="Branch, tag or commit" placeholder="The default branch" value={ref} onChange={(e) => setRef(e.target.value)} /></label>
