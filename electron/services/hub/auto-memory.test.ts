@@ -164,13 +164,14 @@ describe('session summaries', () => {
     const memory = new MemoryService(path.join(root, 'memory')); const written: string[] = [];
     const auto = track(new AutoMemory({ memory, enabled: () => true, server: '/s', executable: '/e', scratch: path.join(root, 'scratch'), onWrite: (key) => written.push(key) }));
     const active = run('claude', project); auto.prepare(active, 'sonnet', info('claude'), { args: [] });
-    await new Promise((resolve) => setTimeout(resolve, 300));
+    // The baseline (git status and HEAD) is read in the background: a fixed wait was too short on a busy Windows runner.
+    await auto.settled();
     fs.writeFileSync(path.join(project, 'app.txt'), 'changed\n'); git(project, 'commit', '-am', 'Change app'); fs.writeFileSync(path.join(project, 'new.txt'), 'new');
     const transcript = path.join(root, 't.jsonl'); fs.writeFileSync(transcript, JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text: 'Added new.txt' }] } }) + '\n');
     const note = await auto.finish(active.runId, transcript);
     expect(note?.author).toBe('claude'); expect(note?.content).toContain('Files changed in the repository while the session ran (git status; may include other channels’ work in this folder):\n- ?? new.txt'); expect(note?.content).toContain('?? new.txt'); expect(note?.content).not.toContain('before.txt'); expect(note?.content).toContain('Change app'); expect(note?.content).toContain('Added new.txt');
     expect(written).toEqual([projectMemoryKey(project)]); expect(fs.existsSync(path.join(root, 'scratch', `${active.runId}.mcp.json`))).toBe(false);
-    const idle = run('codex', project); auto.prepare(idle, '', info('codex'), { args: [] }); await new Promise((resolve) => setTimeout(resolve, 300));
+    const idle = run('codex', project); auto.prepare(idle, '', info('codex'), { args: [] }); await auto.settled();
     expect(await auto.finish(idle.runId, null)).toBeNull();
   });
   it('skips a session that changed nothing and ended on a short message, unless it made a commit', async () => {

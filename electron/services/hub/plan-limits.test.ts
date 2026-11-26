@@ -3,6 +3,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { CLAUDE_USAGE_ARGS, inBatches, PlanLimitsService, readClaudeLimits, readCodexLimits, readGeminiLimits } from './plan-limits';
+/** Each read starts real processes standing in for the CLIs: a busy Windows runner can take longer than the 5 s default. */
+vi.setConfig({ testTimeout: 60_000 });
 
 /** Node itself stands in for a CLI: `--` keeps the CLI's arguments (`-p /usage`, `app-server`) away from Node. */
 const fake = (script: string) => ({ file: process.execPath, prefixArgs: ['-e', script, '--'], extraEnv: {}, displayPath: 'node' });
