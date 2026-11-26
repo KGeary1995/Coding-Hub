@@ -19,7 +19,7 @@ import { AUTH_TIMED_OUT } from './auth-status';
 import { geminiConversations } from './gemini-conversations';
 import { cleanMessage, codexApproval, GeminiStatusReader, OscNotifications, type GeminiStatus } from './attention';
 import { ScreenReader } from './screen-reader';
-import { nodePty, ptyProcessEnded } from './native-pty';
+import { conptyOptions, nodePty, ptyProcessEnded } from './native-pty';
 import { CHAT_ARGS, ClaudeStream, type ChatStream } from '../chat/claude-stream';
 import { CodexStream, type CodexThreadOptions } from '../chat/codex-stream';
 import { GeminiStream } from '../chat/gemini-stream';
@@ -113,6 +113,9 @@ export interface HeldTerminals {
  */
 /** A title the CLI gives its terminal (OSC 0 or 2): Claude Code's task summary, for phones. */
 const TITLE = /\x1b\](?:0|2);([^\x07\x1b]{0,200})(?:\x07|\x1b\\)/g;
+/** Windows job objects (runner/jobs.ts) for the runs Trace starts itself, as the runner has for its terminals. */
+export interface RunJobs { add(pid: number): unknown; kill(pid: number): Promise<unknown>; drop(pid: number): unknown }
+
 export const HIGH_WATER = 1024 * 1024; export const LOW_WATER = 256 * 1024; const STALL_MS = 5000;
 /** How long a run whose screen stopped showing work must stay quiet before Trace takes the turn as ended (settledTurn). */
 export const SETTLED_MS = !process.env.CODING_HUB_TEST_SETTLED_MS ? 8000 : Number(process.env.CODING_HUB_TEST_SETTLED_MS);
@@ -154,6 +157,8 @@ interface ManagedRun {
   turnOpen?: boolean;
   /** Its terminal is in the background runner: quitting Trace leaves it running (docs/background-runner.md). */
   held?: boolean;
+  /** Started here and put in a Windows job (`jobs`): Stop ends the job too, and its end lets go of it. */
+  job?: boolean;
 }
 
 export class PtyManager {
@@ -194,12 +199,14 @@ export class PtyManager {
       /** The IDs of the conversations agy already had when a run started: none of them is that run's (tests replace it). */
       geminiKnown?: () => string[];
       held?: HeldTerminals;
+      /** Windows: the runs started here (not in the runner) each go in a job object, so Stop ends what left their tree. */
+      jobs?: RunJobs;
       /** A terminal the runner kept while Trace was closed was taken up again: what prepareLaunch set up for it is restored. */
       onAdopted?: (session: RunningSession, meta: HeldMeta, owner: number) => void;
       /** A plugin tile's program (plugins.ts), looked up by the plugin and tile the channel names. */
       pluginTile?: (plugin: { id: string; tile: string }) => { file: string; args: string[]; env: Record<string, string> } } = {},
   ) {
-    this.spawn = dependencies.spawn ?? ((file, args, options) => nodePty().spawn(file, args, options));
+    this.spawn = dependencies.spawn ?? ((file, args, options) => nodePty().spawn(file, args, { ...options, ...conptyOptions() }));
     this.discover = dependencies.discover ?? discoverEngine;
     this.environment = dependencies.environment ?? freshHostEnvironment;
   }
@@ -375,7 +382,7 @@ export class PtyManager {
       let resolveExit!: () => void;
       const exit = new Promise<void>((resolve) => { resolveExit = resolve; });
       const run: ManagedRun = { owner, session, pty, nativeKey, outputTail: '', pendingData: '', exit, resolveExit, stopping: null, finished: false, unacked: 0, paused: false, ...(session.engine === 'codex' ? { osc: new OscNotifications() } : {}), ...(session.engine === 'gemini' && !chat ? { gemini: { reader: new GeminiStatusReader(), last: null, since: Date.now(), known: this.geminiKnown() } } : {}), ...(session.engine !== 'gemini' && session.engine !== 'shell' && !chat ? { status7501: { reader: new GeminiStatusReader(), last: null } } : {}) };
-      if (held) run.held = true;
+      if (held) run.held = true; else if (this.dependencies.jobs) { run.job = true; void this.dependencies.jobs.add(pty.pid); }
       if (request.config.engine === 'custom') { run.agentName = agentName; if (!chat) run.custom = this.customReader(run, customStatus, request.cols, request.rows); }
       // The first request went in as arguments: the agent's first turn is under way without an Enter, and is not typed again.
       if (prompted) { run.custom?.begin(); session.prompted = true; }
@@ -706,6 +713,8 @@ export class PtyManager {
       if (conversationId) this.send(run.owner, { type: 'conversation', sessionId: run.session.sessionId, runId: run.session.runId, conversationId: conversationId.toLowerCase() });
     }
     run.finished = true; if (run.stall) clearTimeout(run.stall); run.chat?.close();
+    // A run being stopped lets go of its job once Stop has ended it (terminate), not before.
+    if (run.job && !run.stopping) void this.dependencies.jobs?.drop(run.pty.pid);
     if (run.chat) { try { this.tables.ended(run.session.runId); } catch { /* The table is gone with it. */ } try { this.chains.ended(run.session.runId); } catch { /* The table is gone with it. */ } }
     this.flush(run);
     if (this.runs.get(run.session.sessionId) === run) this.runs.delete(run.session.sessionId);
@@ -719,8 +728,10 @@ export class PtyManager {
   }
 
   private async terminate(run: ManagedRun): Promise<void> {
-    try { if (await stopProcess(run.pty, run.exit, this.dependencies.stopDependencies)) this.finish(run, 130); }
+    const jobs = run.job ? this.dependencies.jobs : undefined;
+    try { if (await stopProcess(run.pty, run.exit, jobs ? { ...this.dependencies.stopDependencies, endJob: (pid) => jobs.kill(pid) } : this.dependencies.stopDependencies)) this.finish(run, 130); }
     catch (error) { run.stopping = null; throw error; }
+    finally { if (jobs && run.finished) void jobs.drop(run.pty.pid); }
   }
 
   async stopOwner(owner: number) {

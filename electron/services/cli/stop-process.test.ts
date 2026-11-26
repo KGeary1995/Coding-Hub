@@ -15,6 +15,15 @@ it('closes the Windows terminal without node-pty ending the stopped tree\'s proc
   await stopProcess(pty, exited, { platform: 'win32', killTree: async () => {}, isAlive: () => false });
   expect(pty.kill).toHaveBeenCalledWith(); expect(lookup).not.toHaveBeenCalled();
 });
+it('ends a Windows run\'s job after its tree and before closing the terminal, and only once the tree is stopped', async () => {
+  const { pty, exited, resolve } = fixture(); const order: string[] = []; (pty.kill as ReturnType<typeof vi.fn>).mockImplementation(() => { order.push('pty'); resolve(); });
+  await stopProcess(pty, exited, { platform: 'win32', killTree: async () => { order.push('tree'); }, endJob: async (pid) => { order.push(`job ${pid}`); }, isAlive: () => false }); expect(order).toEqual(['tree', `job ${pty.pid}`, 'pty']);
+  // A job that cannot be ended does not fail a Stop whose tree is gone.
+  const second = fixture(); (second.pty.kill as ReturnType<typeof vi.fn>).mockImplementation(() => second.resolve());
+  await expect(stopProcess(second.pty, second.exited, { platform: 'win32', killTree: async () => {}, endJob: async () => { throw new Error('No job'); }, isAlive: () => false })).resolves.toBe(false);
+  const failed = fixture(); const endJob = vi.fn(async () => {});
+  await expect(stopProcess(failed.pty, failed.exited, { platform: 'win32', killTree: async () => { throw new Error('Denied'); }, endJob, isAlive: () => true })).rejects.toMatchObject({ code: 'STOP_FAILED' }); expect(endJob).not.toHaveBeenCalled();
+});
 it('reports Windows kill failure without claiming success or orphaning children via a terminal-first kill', async () => {
   const { pty, exited } = fixture(); await expect(stopProcess(pty, exited, { platform: 'win32', killTree: async () => { throw new Error('Denied'); }, isAlive: () => true })).rejects.toMatchObject({ code: 'STOP_FAILED' }); expect(pty.kill).not.toHaveBeenCalled();
 });

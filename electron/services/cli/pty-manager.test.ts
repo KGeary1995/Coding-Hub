@@ -5,7 +5,7 @@ import type { ChatEnvelope } from '../../../shared/chat';
 import type { CLIEngine } from '../../../shared/types';
 import { spawnChatProcess } from '../chat/chat-process';
 import { MAX_CHANNELS } from '../../../shared/schemas';
-import { exitTail, HIGH_WATER, isWithinDirectory, LOW_WATER, PtyManager, shellProgram } from './pty-manager';
+import { exitTail, HIGH_WATER, isWithinDirectory, LOW_WATER, PtyManager, shellProgram, type HeldTerminals } from './pty-manager';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -633,6 +633,40 @@ describe('the background runner', () => {
   it('starts a terminal here when the runner cannot', async () => {
     const { manager, local, held } = heldFixture(); held.spawn.mockRejectedValueOnce(new Error('The background runner is not connected.'));
     await manager.start(1, request('tile-a')); expect(local).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('Windows job objects for runs started here', () => {
+  function jobsFixture(held?: HeldTerminals) {
+    const calls: string[] = []; const processes: FakePty[] = [];
+    const jobs = { add: vi.fn((pid: number) => { calls.push(`add ${pid}`); return Promise.resolve(true); }), kill: vi.fn(async (pid: number) => { calls.push(`kill ${pid}`); return true; }), drop: vi.fn((pid: number) => { calls.push(`drop ${pid}`); return Promise.resolve(true); }) };
+    const spawn = () => { const pty = new FakePty(); pty.pid = 1000 + processes.length; pty.kill.mockImplementation(() => { calls.push(`close ${pty.pid}`); queueMicrotask(() => pty.exit({ exitCode: 0 })); }); processes.push(pty); return pty as unknown as IPty; };
+    const manager = new PtyManager(() => {}, { stopDependencies: { platform: 'win32', killTree: async (pid) => { calls.push(`tree ${pid}`); }, isAlive: () => false }, spawn, discover: async (engine) => engines(engine), environment: () => ({ PATH: '/bin' }), jobs, ...(held ? { held } : {}) });
+    managers.push(manager);
+    return { manager, calls, processes, jobs };
+  }
+
+  it('puts the run in a job, ends the job between the tree and the terminal on Stop, and lets go of it after', async () => {
+    const { manager, calls } = jobsFixture();
+    const session = await manager.start(1, request('tile-job'));
+    expect(calls).toEqual(['add 1000']);
+    await manager.stop(1, { sessionId: 'tile-job', runId: session.runId });
+    expect(calls).toEqual(['add 1000', 'tree 1000', 'kill 1000', 'close 1000', 'drop 1000']);
+  });
+
+  it('lets go of the job when the run ends by itself', async () => {
+    const { manager, calls, processes } = jobsFixture();
+    await manager.start(1, request('tile-job'));
+    processes[0].exit({ exitCode: 0 });
+    expect(calls).toEqual(['add 1000', 'drop 1000']);
+  });
+
+  it('leaves a run the background runner holds to the runner\'s own jobs', async () => {
+    const heldPty = new FakePty(); heldPty.pid = 2000;
+    const { manager, jobs } = jobsFixture({ spawn: async () => heldPty as unknown as IPty, take: async () => null });
+    const session = await manager.start(1, request('tile-held'));
+    await manager.stop(1, { sessionId: 'tile-held', runId: session.runId });
+    expect(jobs.add).not.toHaveBeenCalled(); expect(jobs.kill).not.toHaveBeenCalled(); expect(jobs.drop).not.toHaveBeenCalled();
   });
 });
 

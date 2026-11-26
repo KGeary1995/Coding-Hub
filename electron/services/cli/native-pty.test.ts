@@ -3,7 +3,7 @@ import { createRequire } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { ensureSpawnHelper, ptyProcessEnded, skipConsoleProcessLookup } from './native-pty';
+import { conptyOptions, ensureSpawnHelper, ptyProcessEnded, skipConsoleProcessLookup } from './native-pty';
 
 describe('node-pty Windows internals Trace relies on', () => {
   it('replaces the console process lookup and reads the exit node-pty has not reported yet', async () => {
@@ -33,5 +33,27 @@ describe.skipIf(process.platform === 'win32')('node-pty spawn-helper', () => {
     expect(fs.statSync(path.join(root, 'prebuilds/darwin-arm64/spawn-helper')).mode & 0o777).toBe(0o755);
     expect(fs.statSync(path.join(root, 'prebuilds/win32-x64/spawn-helper')).mode & 0o777).toBe(0o644);
     expect(ensureSpawnHelper(root, 'darwin')).toEqual([]);
+  });
+});
+
+describe('the bundled ConPTY switch', () => {
+  it('is off unless CODING_HUB_CONPTY_DLL=1, and only on Windows', () => {
+    expect(conptyOptions({}, 'win32')).toEqual({});
+    expect(conptyOptions({ CODING_HUB_CONPTY_DLL: 'true' }, 'win32')).toEqual({});
+    expect(conptyOptions({ CODING_HUB_CONPTY_DLL: '1' }, 'win32')).toEqual({ useConptyDll: true });
+    expect(conptyOptions({ CODING_HUB_CONPTY_DLL: '1' }, 'darwin')).toEqual({});
+  });
+  it('is an option the installed node-pty has, with the files it loads for it', () => {
+    const root = path.dirname(createRequire(path.join(process.cwd(), 'package.json')).resolve('node-pty/package.json'));
+    expect(fs.readFileSync(path.join(root, 'typings', 'node-pty.d.ts'), 'utf8')).toContain('useConptyDll?: boolean;');
+    // conpty.node loads conpty\conpty.dll from its own folder, and that starts the OpenConsole.exe beside it.
+    for (const arch of ['x64', 'arm64']) for (const name of ['conpty.dll', 'OpenConsole.exe']) expect(fs.existsSync(path.join(root, 'prebuilds', `win32-${arch}`, 'conpty', name))).toBe(true);
+  });
+  it('needs nothing for Ctrl+C: node-pty restores it in the spawning process before it starts each program', () => {
+    // An inherited "ignore Ctrl+C" (a detached runner can have one: libuv starts it with CREATE_NEW_PROCESS_GROUP) would
+    // otherwise reach every program; the flag is inherited, so clearing it before CreateProcessW gives the default.
+    const source = fs.readFileSync(path.join(path.dirname(createRequire(path.join(process.cwd(), 'package.json')).resolve('node-pty/package.json')), 'src', 'win', 'conpty.cc'), 'utf8');
+    expect(source.indexOf('SetConsoleCtrlHandler(NULL, FALSE);')).toBeGreaterThan(0);
+    expect(source.indexOf('SetConsoleCtrlHandler(NULL, FALSE);')).toBeLessThan(source.indexOf('CreateProcessW('));
   });
 });

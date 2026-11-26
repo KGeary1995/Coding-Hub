@@ -16,6 +16,15 @@ export function nodePty(): typeof import('node-pty') {
   return require('node-pty') as typeof import('node-pty');
 }
 
+/**
+ * CODING_HUB_CONPTY_DLL=1 (experimental, untested; docs/troubleshooting.md): Windows terminals use the ConPTY node-pty
+ * 1.1 ships (prebuilds/win32-<arch>/conpty: conpty.dll and OpenConsole.exe) instead of the one built into Windows.
+ * Off by default: an earlier quick try hung. Both places that start terminals use it: PtyManager and the runner.
+ */
+export function conptyOptions(env: NodeJS.ProcessEnv = process.env, platform: NodeJS.Platform = process.platform): { useConptyDll?: true } {
+  return platform === 'win32' && env.CODING_HUB_CONPTY_DLL === '1' ? { useConptyDll: true } : {};
+}
+
 /** node-pty's Windows agent (internal: node-pty 1.1's windowsPtyAgent.js), where present. */
 type WindowsAgent = { exitCode?: number; _getConsoleProcessList?: () => Promise<number[]> };
 function windowsAgent(pty: unknown): WindowsAgent | null {

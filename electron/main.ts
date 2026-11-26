@@ -46,6 +46,7 @@ import { geminiModels, ModelCatalog } from './services/cli/model-catalog';
 import { WorkspaceStorage } from './services/storage/workspace-storage';
 import { saveResume, takeResume } from './services/storage/resume-list';
 import { BackgroundRunner } from './services/runner/background';
+import { Jobs } from './services/runner/jobs';
 import { readPorts, runnerPlace, writePorts } from './services/runner/kit';
 import { ChannelTools } from './services/cli/channel-tools';
 import { EventHooks } from './services/workbench/event-hooks';
@@ -272,6 +273,12 @@ function hookEvent(event: 'needs-you' | 'turn-ended' | 'failed' | 'started' | 's
 let background: BackgroundRunner | null = null;
 function runnerOn() { if (process.env.CODING_HUB_NO_RUNNER) return false; return process.env.CODING_HUB_RUNNER === '1' || (app.isPackaged && hub?.preferences().backgroundRunner !== false); }
 function runner() { if (!runnerOn()) return null; if (!background) { background = new BackgroundRunner(storageRoot, app.getAppPath(), process.execPath); background.meta = (meta) => ({ attention: attention.token(meta.session.runId), tools: channelTools.token(meta.session.runId) }); background.onProblem = (message) => reportStorageError(message); } return background; }
+/**
+ * Windows job objects for the channels Trace runs itself (chats, and terminals with the runner off), through the same
+ * helper as the runner's (dist-electron/native/trace-jobs.exe), started the first time a channel starts.
+ */
+let ownJobs: Jobs | null = null;
+const jobs = () => ownJobs ??= new Jobs(path.join(app.getAppPath(), 'dist-electron', 'native', 'trace-jobs.exe'), (message) => hostHealth?.record('job-helper', message.slice(0, 200)));
 const savedPorts = () => readPorts(runnerPlace(storageRoot));
 function savePorts() { try { writePorts(runnerPlace(storageRoot), { attention: attention.listening, tools: channelTools.listening }); } catch { hostHealth?.record('runner-ports-unsaved'); } }
 /** The tray's Stop all channels and quit: the runner's channels stop too, instead of running on. */
@@ -328,6 +335,7 @@ const manager = new PtyManager((owner, event) => timed(`session-${event.type}`, 
     if (event.type === 'exit' && event.exitCode !== 0 && event.diagnostic) desktopAlert({ title: `${channelLabel(event.sessionId)} stopped with an error`, body: event.diagnostic.split('\n')[0], target: { sessionId: event.sessionId } });
   } catch { hostHealth?.record('desktop-alert-failed'); }
 }), {
+  ...(process.platform === 'win32' ? { jobs: { add: (pid: number) => jobs().add(pid), kill: (pid: number) => jobs().kill(pid), drop: (pid: number) => jobs().drop(pid) } } : {}),
   held: { spawn: (file, args, options, meta) => runner()?.spawn(file, args, options, meta) ?? Promise.reject(new Error('The background runner is off.')), take: (sessionId) => runner()?.take(sessionId) ?? Promise.resolve(null) },
   // A channel taken up after a restart: its agent's hooks and channel tools call with the tokens it was started with.
   // Its usage is not followed again (Usage would count what the run had already read).

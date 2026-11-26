@@ -3,7 +3,7 @@ import path from 'node:path';
 import type { IPty } from 'node-pty';
 import { HubError } from './engine-adapter';
 import { skipConsoleProcessLookup } from './native-pty';
-export interface StopDependencies { platform?: NodeJS.Platform; killTree?: (pid: number) => Promise<void>; isAlive?: (pid: number) => boolean; signalGroup?: (pid: number, signal: NodeJS.Signals) => void; waitMilliseconds?: number }
+export interface StopDependencies { platform?: NodeJS.Platform; killTree?: (pid: number) => Promise<void>; isAlive?: (pid: number) => boolean; signalGroup?: (pid: number, signal: NodeJS.Signals) => void; waitMilliseconds?: number; /** Windows: ends the run's job object (runner/jobs.ts) once its tree is stopped, so a child that left the tree ends too. */ endJob?: (pid: number) => Promise<unknown> }
 export function processAlive(pid: number): boolean { try { process.kill(pid, 0); return true; } catch (error) { return (error as NodeJS.ErrnoException).code !== 'ESRCH'; } }
 function windowsTree(pid: number): Promise<void> {
   const executable = path.win32.join(process.env.SystemRoot ?? process.env.WINDIR ?? 'C:\\Windows', 'System32', 'taskkill.exe');
@@ -20,6 +20,8 @@ export async function stopProcess(pty: IPty, exit: Promise<void>, dependencies: 
     // Kill the child tree before closing ConPTY; killing its launcher first can orphan descendants.
     try { await (dependencies.killTree ?? windowsTree)(pty.pid); }
     catch { if (!exited && alive(pty.pid)) throw new HubError('STOP_FAILED', 'Windows could not stop the CLI process tree. Retry Stop or check the channel’s process ID in Task Manager.'); }
+    // As the runner does for its terminals: the job after the tree and before the pseudoconsole closes.
+    try { await dependencies.endJob?.(pty.pid); } catch { /* The tree stop above is what Stop relies on. */ }
     // node-pty rejects every signal on Windows (and a deferred rejection throws later, outside this
     // try); only the argument-less kill closes the pseudoconsole. The tree is already gone, so node-pty
     // must not look up and end the console's processes by id itself (see skipConsoleProcessLookup).
