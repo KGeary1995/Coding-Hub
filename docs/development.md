@@ -48,6 +48,7 @@ Packages contain exactly `dist/`, `dist-electron/`, `package.json` and `node_mod
 | `test:release` | `node --test scripts/release-paths.node-test.cjs`: artifact names, versions, staging, workflow invariants | no |
 | `test:pty` | Real PTY start, input, resize and stop under Electron-as-Node | no |
 | `test:runner` | The background runner (`electron/services/runner/`, docs/background-runner.md) holding a real terminal while nothing is connected, giving its kept output back, and leaving when idle | no |
+| `CODING_HUB_TEST_HC=<hc> npx vitest run electron/services/runner/herdr.test.ts` | The herdr-core trial (docs/background-runner.md section 9) against a real `hc`; skipped without it. |
 | `test:memory` | The memory MCP server over stdio: negotiation, tools, malformed input, persistence | no |
 | `test:desktop` | Largest end-to-end smoke: PTYs, restore, unavailable storage, files, Git review, usage, MCP, skills, Drive mirror, rules, help, and that the application menu has no Reload, Force Reload or Close Window item (Ctrl+R / Ctrl+W, Cmd on a Mac) | yes |
 | `test:design`, `test:profiles`, `test:workbench`, `test:enterprise`, `test:productivity`, `test:models-stability`, `test:remote` | Feature smoke tests (layout at several sizes, Claude profiles, coaching, diagnostics/verification, Git delivery and backups, model catalog and crash recovery, phone pairing) | yes |
