@@ -88,7 +88,7 @@ import { isAgentConfig, isBuiltInAgent, isChatEngineConfig, isChatRun, SUBMIT_DE
 import { CustomAgents } from './services/agents/agents';
 import { buildAcpLaunch, buildCustomLaunch, takesTools, type McpServer } from './services/agents/launch';
 import { AGENT_ID } from '../shared/agent-definition';
-import { isBuiltInRun } from '../shared/ipc';
+import { isBuiltInRun, type BuiltInRunningSession } from '../shared/ipc';
 
 const storageBase = process.env.CODING_HUB_STORAGE_DIR ? path.resolve(process.env.CODING_HUB_STORAGE_DIR) : path.join(homedir(), '.coding-hub');
 // The app installed as "AI Coding Hub" before it was renamed Trace; its Electron profile (window and display settings,
@@ -338,8 +338,11 @@ const manager = new PtyManager((owner, event) => timed(`session-${event.type}`, 
   ...(process.platform === 'win32' ? { jobs: { add: (pid: number) => jobs().add(pid), kill: (pid: number) => jobs().kill(pid), drop: (pid: number) => jobs().drop(pid) } } : {}),
   held: { spawn: (file, args, options, meta) => runner()?.spawn(file, args, options, meta) ?? Promise.reject(new Error('The background runner is off.')), take: (sessionId) => runner()?.take(sessionId) ?? Promise.resolve(null) },
   // A channel taken up after a restart: its agent's hooks and channel tools call with the tokens it was started with.
-  // Its usage is not followed again (Usage would count what the run had already read).
-  onAdopted: (session, meta, owner) => { runOwners.set(session.runId, owner); attention.restore(session.runId, meta.attention); channelTools.restore(session.runId, meta.tools); },
+  // Claude's usage is followed again (telemetry.adopt), so its context, tokens and limits do not stop where Trace closed.
+  onAdopted: (session, meta, owner) => {
+    runOwners.set(session.runId, owner); attention.restore(session.runId, meta.attention); channelTools.restore(session.runId, meta.tools);
+    const config = meta.config; if (session.engine === 'claude' && isBuiltInAgent(config) && config.engine === 'claude') try { hub?.telemetry?.adopt(session as BuiltInRunningSession, config, config.accountProfileId ? claudeProfiles.directory(config.accountProfileId) : undefined); } catch { hostHealth?.record('telemetry-read-failed'); }
+  },
   pluginTile: (plugin) => { if (!plugins) throw new HubError('PLUGIN_TILE', 'Plugins are unavailable: Trace\'s storage could not be opened.'); return plugins.tile(plugin.id, plugin.tile); },
   onChat: (owner, envelope) => {
   // A chat run's conversation is kept in its saved output as text, so it can be searched and exported like a terminal's.

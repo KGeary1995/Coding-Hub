@@ -54,6 +54,30 @@ describe('price rates', () => {
   });
 });
 
+describe('a Claude run the background runner kept while Trace was closed', () => {
+  it('is followed again in its conversation, counting what it did meanwhile once, without passing old lines on as new', async () => {
+    vi.useFakeTimers(); const { root, home, dir } = setup(); const run = { runId: randomUUID(), sessionId: 's', engine: 'claude' as const, cwd: '/project', pid: 1 }; const conversation = randomUUID();
+    const file = path.join(dir, conversation + '.jsonl'); fs.writeFileSync(file, reply('a', 100, 1));
+    const first = new TelemetryService(path.join(root, 'telemetry'), () => [], () => {}, () => {}, home, path.join(root, 'codex'));
+    try { first.start(run, { ...claude, resumeId: conversation } as never); vi.advanceTimersByTime(750); expect(first.runUsage(run.runId)).toMatchObject({ input: 100, context: { used: 101 } }); } finally { first.close(); }
+    // Trace was closed while Claude went on in the runner.
+    fs.appendFileSync(file, reply('b', 900, 2));
+    const lines: unknown[] = []; const published: UsageRecord[] = [];
+    const again = new TelemetryService(path.join(root, 'telemetry'), () => [], (usage) => published.push(usage), () => {}, home, path.join(root, 'codex')); again.onLine = (_run, _config, raw) => { lines.push(raw); };
+    try {
+      const before = again.runUsage(run.runId)!.timestamp;
+      // Its saved channel settings name no conversation: the one it was last read in is used.
+      again.adopt(run, claude); again.setContextWindow(run.runId, 1_000_000); vi.advanceTimersByTime(750);
+      expect(again.runUsage(run.runId)).toMatchObject({ input: 1000, output: 3, timestamp: before, context: { used: 902, limit: 1_000_000 } }); expect(lines).toEqual([]);
+      fs.appendFileSync(file, reply('c', 50, 1)); vi.advanceTimersByTime(750);
+      expect(again.runUsage(run.runId)).toMatchObject({ input: 1050, context: { used: 51 } }); expect(lines).toHaveLength(1);
+      // Taken up once only; a Codex run is not.
+      again.adopt(run, claude); again.adopt({ ...run, runId: randomUUID(), engine: 'codex' as const }, { ...claude, engine: 'codex' } as never);
+      expect((again as unknown as { watches: Map<string, unknown> }).watches.size).toBe(1);
+    } finally { again.close(); }
+  });
+});
+
 describe('subagents started by a workflow', () => {
   it('count toward the run, apart from another workflow run\'s agent of the same name and from files that are not transcripts', async () => {
     vi.useFakeTimers(); const { root, home, dir } = setup(); const run = { runId: randomUUID(), sessionId: 's', engine: 'claude' as const, cwd: '/project', pid: 1 };

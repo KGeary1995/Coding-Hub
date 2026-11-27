@@ -118,6 +118,8 @@ interface Watcher { requiresThread: boolean; baseline: Snapshot | null; claudeHo
   subagents?: Map<string, SubagentState>; walked?: number; timer?: ReturnType<typeof setInterval>; polling: boolean; stopped: boolean; thread: string | null; logDir: string;
   /** Reads of the CLI's usage log that failed in a row, and whether the person was told. */
   errors?: number; reported?: boolean;
+  /** A run taken up again after a restart (adopt): its transcript's lines up to this byte were there before, not new. */
+  kept?: boolean; quietUntil?: number;
   /** A conversation the run switched to whose transcript has not been found yet; the window is told once it is. */
   following?: string;
   /** While the CLI's log is not found: since when it has been looked for, and when to look next. */
@@ -275,10 +277,23 @@ export class TelemetryService {
     if (config.engine === 'claude' && !config.resumeId && info.supportsSessionId) launch.args.push('--session-id', run.runId);
     if (config.engine === 'codex' && info.supportsConfig) { const logDir = path.join(this.root, run.runId); fs.mkdirSync(logDir, { recursive: true, mode: 0o700 }); launch.args.push('--config', `log_dir=${JSON.stringify(logDir.replace(/\\/g, '/'))}`); }
   }
-  start(run: BuiltInRunningSession, config: CLIEngineConfig, claudeHome = this.claudeHome) {
+  /**
+   * A Claude run the background runner kept while Trace was closed, taken up again (pty-manager adopt): followed in the
+   * conversation it was last read in, from that transcript's start, so what it did while Trace was closed counts too. A
+   * reply this run already recorded is the same row (by message id) and counts once, and its recorded start is kept; the
+   * lines that were there before are not passed on as new (onLine). Codex keeps one running total that a resumed run
+   * counts from a baseline Trace does not keep, so a kept Codex run is not followed again.
+   */
+  adopt(run: BuiltInRunningSession, config: CLIEngineConfig, claudeHome = this.claudeHome) {
+    if (run.engine !== 'claude' || this.watches.has(run.runId) || this.closed) return;
+    let kept: Record<string, unknown> | null = null; try { const record = this.database.prepare('SELECT value FROM metadata WHERE run=?').get(run.runId); if (record) kept = JSON.parse(String(record.value)) as Record<string, unknown>; } catch { kept = null; }
+    const conversation = typeof kept?.conversationId === 'string' && UUID.test(kept.conversationId) ? kept.conversationId : undefined;
+    this.start(run, conversation ? { ...config, resumeId: conversation } : config, claudeHome, kept);
+  }
+  start(run: BuiltInRunningSession, config: CLIEngineConfig, claudeHome = this.claudeHome, kept: Record<string, unknown> | null = null) {
     const baseline = this.baselines.get(run.runId); this.baselines.delete(run.runId);
-    const watch: Watcher = { requiresThread: false, baseline: baseline?.usage ?? null, claudeHome, run, config, start: Date.now(), file: baseline?.file ?? null, offset: baseline?.offset ?? 0, partial: Buffer.alloc(0), model: config.model || baseline?.usage?.model || 'CLI default', polling: false, stopped: false, thread: null, logDir: path.join(this.root, run.runId), ...(baseline?.subagents?.size ? { subagents: new Map([...baseline.subagents].map(([name, offset]) => [name, { offset, partial: Buffer.alloc(0) }])) } : {}) };
-    this.database.prepare('INSERT OR REPLACE INTO metadata(run,value) VALUES(?,?)').run(run.runId, JSON.stringify({ runId: run.runId, sessionId: run.sessionId, engine: run.engine, model: watch.model, cwd: run.cwd, timestamp: new Date(watch.start).toISOString() })); this.totals.delete(run.runId);
+    const watch: Watcher = { requiresThread: false, baseline: baseline?.usage ?? null, claudeHome, run, config, start: Date.now(), file: baseline?.file ?? null, offset: baseline?.offset ?? 0, partial: Buffer.alloc(0), model: config.model || baseline?.usage?.model || (typeof kept?.model === 'string' ? kept.model : '') || 'CLI default', polling: false, stopped: false, thread: null, logDir: path.join(this.root, run.runId), ...(baseline?.subagents?.size ? { subagents: new Map([...baseline.subagents].map(([name, offset]) => [name, { offset, partial: Buffer.alloc(0) }])) } : {}), ...(kept ? { kept: true } : {}) };
+    if (!kept) this.database.prepare('INSERT OR REPLACE INTO metadata(run,value) VALUES(?,?)').run(run.runId, JSON.stringify({ runId: run.runId, sessionId: run.sessionId, engine: run.engine, model: watch.model, cwd: run.cwd, timestamp: new Date(watch.start).toISOString() })); this.totals.delete(run.runId);
     if (run.engine === 'codex') for (const other of this.watches.values()) { if (other.run.engine === 'codex' && other.run.cwd === run.cwd && !other.stopped) { other.requiresThread = true; watch.requiresThread = true; } }
     this.watches.set(run.runId, watch); watch.timer = setInterval(() => timed('telemetry-poll', () => this.poll(watch)), 750); this.poll(watch);
   }
@@ -365,16 +380,17 @@ export class TelemetryService {
    */
   private ingest(w: Watcher, file: string, state: { offset: number; partial: Buffer }, subagent: boolean): boolean {
     const size = fs.statSync(file).size; if (size < state.offset) { state.offset = 0; state.partial = Buffer.alloc(0); }
+    if (!subagent && w.kept && w.quietUntil === undefined) w.quietUntil = size;
     const count = Math.min(512000, size - state.offset); if (count <= 0) return false;
     const buffer = Buffer.alloc(count); const fd = fs.openSync(file, 'r'); let read: number; try { read = fs.readSync(fd, buffer, 0, count, state.offset); } finally { fs.closeSync(fd); }
-    const data = Buffer.concat([state.partial, buffer.subarray(0, read)]); let start = 0; let changed = false;
+    const data = Buffer.concat([state.partial, buffer.subarray(0, read)]); let start = 0; let changed = false; const at = state.offset - state.partial.length;
     // One transaction per read: committed one row at a time, a catch-up read took 1-2 ms a reply line. What was read
     // counts as read only once it is committed, so a failed commit is read again.
     const own = !this.writing; if (own) { this.database.exec('BEGIN'); this.writing = true; }
     try {
       for (let end = data.indexOf(10); end >= 0; end = data.indexOf(10, start)) {
         if (end - start <= 2 * 1024 * 1024) try {
-          const raw = JSON.parse(data.subarray(start, end).toString()); if (!subagent && !this.closing) try { this.onLine(w.run, w.config, raw); } catch { /* Coaching never affects usage. */ } if (!subagent && raw.type === 'turn_context' && typeof raw.payload?.model === 'string') w.model = raw.payload.model;
+          const raw = JSON.parse(data.subarray(start, end).toString()); if (!subagent && !this.closing && at + start >= (w.quietUntil ?? 0)) try { this.onLine(w.run, w.config, raw); } catch { /* Coaching never affects usage. */ } if (!subagent && raw.type === 'turn_context' && typeof raw.payload?.model === 'string') w.model = raw.payload.model;
           let parsed = w.run.engine === 'gemini' ? null : parseUsage(w.run.engine, raw, w.model); if (parsed && subagent) { if (parsed.compacted) parsed = null; else parsed.context = null; }
           if (parsed) { if (w.baseline && w.run.engine === 'codex') { for (const key of ['input', 'output', 'cached', 'cacheWrite'] as const) parsed[key] = Math.max(0, parsed[key] - w.baseline[key]); if (parsed.reasoning !== null) parsed.reasoning = Math.max(0, parsed.reasoning - (w.baseline.reasoning ?? 0)); } const old = this.select.get(w.run.runId, parsed.key); if (old) { const prev = JSON.parse(String(old.snapshot)) as Snapshot; for (const key of ['input', 'output', 'cached', 'cacheWrite'] as const) parsed[key] = Math.max(parsed[key], prev[key]); if (prev.reasoning !== null) parsed.reasoning = Math.max(parsed.reasoning ?? 0, prev.reasoning); }
             this.upsert.run(w.run.runId, parsed.key, JSON.stringify(parsed)); changed = true;
