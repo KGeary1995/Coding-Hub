@@ -1,6 +1,7 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import type { IPty, IPtyForkOptions } from 'node-pty';
 import type { HeldMeta, HeldTerminals } from '../cli/pty-manager';
+import { withoutAgentSession } from '../cli/discovery';
 
 /**
  * Trial (2026-11-27, the owner's request): channels' terminals held by herdr-core (`hc`, github.com/herdrdev/herdr-core,
@@ -24,7 +25,8 @@ class HcConnection {
   private streams = new Map<number, { data: (bytes: Buffer) => void; closed: (reason: string) => void }>();
   ready: Promise<void>; lost = false; onLost?: () => void;
   constructor(hc: string) {
-    this.child = spawn(hc, ['connect'], { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
+    // A core this starts starts with Trace's own environment, without an agent session's variables (withoutAgentSession).
+    this.child = spawn(hc, ['connect'], { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true, env: withoutAgentSession(process.env as Record<string, string>) });
     this.child.stdout.on('data', (chunk: Buffer) => this.received(chunk));
     this.child.stderr.on('data', () => { /* hc's own diagnostics; its core.log keeps them. */ });
     const gone = () => { if (this.lost) return; this.lost = true; for (const waiting of this.pending.values()) waiting.reject(new Error('hc connect ended.')); this.pending.clear(); for (const stream of this.streams.values()) stream.closed('lost'); this.streams.clear(); this.onLost?.(); };
@@ -71,18 +73,26 @@ class HcConnection {
   }
 }
 
+/** What HerdrPty needs of HerdrTerminals: the connection now (a new one after a lost line), and where sizes are kept. */
+interface PtyOwner { connect(): Promise<HcConnection>; sized(address: string, cols: number, rows: number): void; problem(message: string): void }
+type Exit = { exitCode: number; signal?: number };
+
 /**
  * An hc terminal as the part of node-pty's IPty that Trace uses (pty-manager.ts, stop-process.ts), like RunnerPty.
- * Paused, it holds back hc's flow-control credit, so hc stops sending until resumed.
+ * Paused, it holds back hc's flow-control credit, so hc stops sending until resumed. A stream that closes while its
+ * program still runs (the line to hc lost, or hc restarted) is attached again; only a program hc says ended is an exit.
  */
 export class HerdrPty {
-  cols: number; rows: number; private data: Listener<string>[] = []; private exits: Listener<{ exitCode: number; signal?: number }>[] = []; private ended = false;
+  cols: number; rows: number; private data: Listener<string>[] = []; private exits: Listener<Exit>[] = []; private ended: Exit | null = null;
   private paused = false; private owed = 0; private decoder = new TextDecoder('utf-8');
-  /** Output before anyone listens (PtyManager attaches its listener after take returns): given to the first listener. */
+  private connection: HcConnection | null = null; private channel = 0;
+  /** Output and an exit before anyone listens (PtyManager listens after spawn or take returns): given to the first listener. */
   private early = '';
   /** `first`: the first paint (screen and history) goes there until it has been quiet for a moment, not to listeners. */
-  constructor(private connection: HcConnection, private channel: number, readonly address: string, readonly pid: number, cols: number, rows: number, private first?: (text: string) => void) {
-    this.cols = cols; this.rows = rows;
+  constructor(private owner: PtyOwner, readonly address: string, readonly pid: number, cols: number, rows: number, private first?: (text: string) => void) { this.cols = cols; this.rows = rows; }
+  /** On an attach stream. */
+  bind(connection: HcConnection, channel: number) {
+    this.connection = connection; this.channel = channel; this.decoder = new TextDecoder('utf-8');
     connection.stream(channel, (bytes) => {
       const text = this.decoder.decode(bytes, { stream: true });
       if (this.paused) this.owed += bytes.length; else this.credit(bytes.length);
@@ -90,70 +100,120 @@ export class HerdrPty {
       if (this.ended || !text) return;
       if (!this.data.length) { this.early += text; return; }
       for (const listener of this.data) listener(text);
-    }, () => void this.finished());
+    }, () => void this.closed());
     // hc sends a stream only as far as its viewer has credited (paints included): a window to start with, then each
     // read is credited back (pause holds that back), as PtyManager's own flow control expects of a terminal.
-    this.credit(WINDOW);
+    this.owed = 0; this.credit(WINDOW);
   }
   /** The first paint is over: what comes now is the program's output. */
   painted() { this.first = undefined; }
   onData(listener: Listener<string>) {
     this.data.push(listener);
-    if (this.early) { const early = this.early; this.early = ''; queueMicrotask(() => { if (!this.ended) listener(early); }); }
+    if (this.early) { const early = this.early; this.early = ''; queueMicrotask(() => listener(early)); }
     return { dispose: () => { this.data = this.data.filter((item) => item !== listener); } };
   }
-  onExit(listener: Listener<{ exitCode: number; signal?: number }>) { this.exits.push(listener); return { dispose: () => { this.exits = this.exits.filter((item) => item !== listener); } }; }
-  write(data: string) { if (!this.ended) this.connection.frame(this.channel, FRAME.data, Buffer.from(data, 'utf8')); }
-  resize(cols: number, rows: number) { if (this.ended) throw new Error('The terminal has ended.'); this.cols = cols; this.rows = rows; const size = Buffer.alloc(4); size.writeUInt16LE(cols, 0); size.writeUInt16LE(rows, 2); this.connection.frame(this.channel, FRAME.resize, size); }
+  onExit(listener: Listener<Exit>) {
+    this.exits.push(listener);
+    // Ended before anyone listened (while a channel was taken up, or before it was attached): told now.
+    if (this.ended) { const ended = this.ended; queueMicrotask(() => listener(ended)); }
+    return { dispose: () => { this.exits = this.exits.filter((item) => item !== listener); } };
+  }
+  write(data: string) { if (!this.ended && this.connection) this.connection.frame(this.channel, FRAME.data, Buffer.from(data, 'utf8')); }
+  resize(cols: number, rows: number) {
+    if (this.ended) throw new Error('The terminal has ended.'); this.cols = cols; this.rows = rows;
+    const size = Buffer.alloc(4); size.writeUInt16LE(cols, 0); size.writeUInt16LE(rows, 2); this.connection?.frame(this.channel, FRAME.resize, size);
+    this.owner.sized(this.address, cols, rows);
+  }
   pause() { this.paused = true; }
   resume() { this.paused = false; if (this.owed) { const owed = this.owed; this.owed = 0; this.credit(owed); } }
   /** Ends the program (hc: hangup, then terminate, then kill). Trace's stopProcess ends its process tree by id first. */
-  kill() { if (!this.ended) void this.connection.call('terminal.kill', { terminal: this.address }).catch(() => {}); }
-  private credit(bytes: number) { const amount = Buffer.alloc(4); amount.writeUInt32LE(bytes, 0); this.connection.frame(this.channel, FRAME.credit, amount); }
-  /** The stream closed: the program exited (its code from hc), or hc went away (the channel shows stopped). */
-  private async finished() {
-    if (this.ended) return;
-    const facts = await this.connection.call<Facts>('terminal.get', { terminal: this.address }).catch(() => null);
-    this.ended = true; const exitCode = facts?.exit_code ?? 1; const signal = facts?.signal ?? undefined;
-    for (const listener of this.exits) listener({ exitCode, ...(signal ? { signal } : {}) });
+  kill() { if (!this.ended) void this.owner.connect().then((connection) => connection.call('terminal.kill', { terminal: this.address })).catch(() => {}); }
+  /** What it showed, for one that ended before it was attached: given to the first listener, as output before one is. */
+  wrote(text: string) { this.early += text; }
+  /** It ended: told to the listeners now, or to the first one later. */
+  end(exit: Exit) { if (this.ended) return; this.ended = exit; for (const listener of this.exits) listener(exit); }
+  private credit(bytes: number) { const amount = Buffer.alloc(4); amount.writeUInt32LE(bytes, 0); this.connection?.frame(this.channel, FRAME.credit, amount); }
+  /**
+   * The stream closed: an exit when hc says the program ended (with its code), else attached again (a lost line, a
+   * restarted hc), a few times over about ten seconds. Only when hc cannot be reached at all is it taken as ended,
+   * and the person told the program may still run there.
+   */
+  private async closed() {
+    for (let attempt = 0; attempt < 6 && !this.ended; attempt++) {
+      if (attempt) await new Promise((resolve) => setTimeout(resolve, 500 * attempt));
+      try {
+        const connection = await this.owner.connect(); const facts = await connection.call<Facts>('terminal.get', { terminal: this.address });
+        if (facts.state !== 'live') { this.end(exitOf(facts)); return; }
+        const attached = await connection.call<{ channel: number }>('terminal.attach', { terminal: this.address, cols: this.cols, rows: this.rows });
+        this.bind(connection, attached.channel); return;
+      } catch { /* hc not back yet: tried again. */ }
+    }
+    if (!this.ended) { this.owner.problem(`Trace lost its line to herdr-core for terminal ${this.address}. Its program may still be running there: hc ls lists it.`); this.end({ exitCode: 1 }); }
   }
 }
+const exitOf = (facts: Facts): Exit => ({ exitCode: facts.exit_code ?? 1, ...(facts.signal ? { signal: facts.signal } : {}) });
 
 /** Lines of history a channel taken up again is shown, beside its screen (Trace's own runner keeps its last 1 MB). */
 const KEPT_HISTORY = 2000;
-/** hc labels and document names allow 1-32 of a-z 0-9 - _ (hc run --help): a run's id without its dashes, shortened. */
-const docName = (runId: string) => `t${runId.replace(/-/g, '').toLowerCase().slice(0, 31)}`;
+/**
+ * hc document names: 1-32 of a-z 0-9 - _ . and not shaped like a terminal's address (t7), which `t` and a run id
+ * starting with a digit was. `trace-` and the run id without dashes, shortened.
+ */
+export const docName = (runId: string) => `trace-${runId.replace(/-/g, '').toLowerCase().slice(0, 26)}`;
+const VARIABLE = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
 /** Trace's channels' terminals in herdr-core: HeldTerminals, as BackgroundRunner is for Trace's own runner. */
-export class HerdrTerminals implements HeldTerminals {
-  private connection: HcConnection | null = null; private left = new Map<string, Facts>(); private listed: Promise<void> | null = null;
+export class HerdrTerminals implements HeldTerminals, PtyOwner {
+  private connection: HcConnection | null = null; private connecting: Promise<HcConnection> | null = null;
+  private left = new Map<string, Facts>(); private listed: Promise<void> | null = null;
+  /** The names in hc's own environment (Unix), which a terminal would inherit unless unset (spawn). */
+  private coreNames: Promise<string[]> | null = null;
+  private sizes = new Map<string, ReturnType<typeof setTimeout>>();
   meta?: (meta: HeldMeta) => Record<string, unknown>;
   onProblem?: (message: string) => void;
   constructor(private hc: string) {}
 
   async spawn(file: string, args: string[], options: IPtyForkOptions, meta: HeldMeta): Promise<IPty> {
     const connection = await this.connect(); const cols = options.cols ?? 80; const rows = options.rows ?? 24;
-    // Its size too: with no viewer hc sets a terminal to its headless size (200 by 120), and a screen painted at that
-    // size would be scrolled out of a tile taken up again.
-    const value = { ...meta, ...this.meta?.(meta), herdrSize: { cols, rows } };
+    const env = (options.env ?? {}) as Record<string, string>;
     const name = docName(meta.session.runId); const kept = await connection.call<{ version: number }>('doc.get', { name });
-    await connection.call('doc.set', { name, value, version: kept.version ?? 0 });
-    // Trace passes the whole environment the CLI needs; hc lays it over the core's own.
-    const run = await connection.call<{ address: string }>('terminal.run', { argv: [file, ...args], cwd: options.cwd ?? process.cwd(), env: (options.env ?? {}) as Record<string, string>, size: { cols, rows }, labels: { trace: '1', session: meta.session.sessionId, run: meta.session.runId }, no_parent: true, no_notify: true });
-    return await this.attach(connection, run.address, cols, rows) as unknown as IPty;
+    await connection.call('doc.set', { name, value: { ...meta, ...this.meta?.(meta) }, version: kept.version ?? 0 });
+    // hc lays the environment given over its own, so a variable Trace left out (an agent session's, withoutAgentSession)
+    // would come back from a core started inside an agent's terminal: on Unix the program starts through env -u for
+    // each such name (names only, never values, on its command line). Windows has no such command; hc connect starts
+    // a core with Trace's own cleaned environment (HcConnection).
+    const unset = (await this.coreEnvironment(connection)).filter((variable) => !(variable in env) && !variable.startsWith('HC_'));
+    const argv = unset.length ? ['/usr/bin/env', ...unset.flatMap((variable) => ['-u', variable]), file, ...args] : [file, ...args];
+    // The size is kept as labels (updated on each resize, sized): with no viewer hc sets a terminal to its headless size
+    // (200 by 120), and a screen painted at that size would be scrolled out of a tile taken up again.
+    const run = await connection.call<{ address: string }>('terminal.run', { argv, cwd: options.cwd ?? process.cwd(), env, size: { cols, rows }, labels: { trace: '1', session: meta.session.sessionId, run: meta.session.runId, cols: String(cols), rows: String(rows) }, no_parent: true, no_notify: true });
+    // From here the program runs: never rejected, or PtyManager would start it a second time in a terminal of its own.
+    try { return await this.attach(run.address, cols, rows) as unknown as IPty; }
+    catch {
+      // It ended before it could be attached (a quick command), or hc cannot attach it: its last screen and its exit.
+      const pty = new HerdrPty(this, run.address, 0, cols, rows);
+      const facts = await connection.call<Facts>('terminal.get', { terminal: run.address }).catch(() => null);
+      if (facts && facts.state !== 'live') {
+        const screen = await connection.call<{ text: string }>('terminal.read', { terminal: run.address, lines: KEPT_HISTORY }).catch(() => null);
+        if (screen?.text) pty.wrote(screen.text.replace(/\r?\n/g, '\r\n'));
+        pty.end(exitOf(facts));
+      } else { void connection.call('terminal.kill', { terminal: run.address }).catch(() => {}); this.problem(`Trace could not attach terminal ${run.address} in herdr-core, so it was stopped.`); pty.end({ exitCode: 1 }); }
+      return pty as unknown as IPty;
+    }
   }
 
   async take(sessionId: string): Promise<{ pty: IPty; meta: HeldMeta; tail: string } | null> {
     await this.leftOver();
-    const facts = this.left.get(sessionId); if (!facts || !this.connection) return null;
+    const facts = this.left.get(sessionId); if (!facts) return null;
     this.left.delete(sessionId);
     const runId = facts.labels?.run; if (!runId) return null;
-    const document = await this.connection.call<{ value: HeldMeta | null }>('doc.get', { name: docName(runId) }).catch(() => null); if (!document?.value) return null;
+    const connection = await this.connect();
+    const document = await connection.call<{ value: HeldMeta | null }>('doc.get', { name: docName(runId) }).catch(() => null); if (!document?.value) return null;
     // The screen as it is, with its history, comes first and in pieces: kept as the channel's output until 250 ms pass
     // without more (2 s at most), as Trace's own runner hands back what it kept.
     let tail = ''; let last = Date.now();
-    const size = (document.value as HeldMeta & { herdrSize?: { cols: number; rows: number } }).herdrSize ?? { cols: 80, rows: 24 };
-    const pty = await this.attach(this.connection, facts.address, size.cols, size.rows, (text) => { tail += text; last = Date.now(); }, KEPT_HISTORY);
+    const cols = Number(facts.labels?.cols) || 80; const rows = Number(facts.labels?.rows) || 24;
+    const pty = await this.attach(facts.address, cols, rows, (text) => { tail += text; last = Date.now(); }, KEPT_HISTORY);
     for (const end = Date.now() + 2000; Date.now() < end && Date.now() - last < 250 || !tail && Date.now() < end;) await new Promise((resolve) => setTimeout(resolve, 50));
     pty.painted();
     return { pty: pty as unknown as IPty, meta: document.value, tail };
@@ -162,12 +222,26 @@ export class HerdrTerminals implements HeldTerminals {
   /** The channels whose terminals kept running while Trace was closed. */
   async kept(): Promise<string[]> { await this.leftOver(); return [...this.left.keys()]; }
   /** Lets go of hc, which keeps every terminal running. */
-  close() { this.connection?.close(); this.connection = null; }
+  close() { for (const timer of this.sizes.values()) clearTimeout(timer); this.sizes.clear(); this.connection?.close(); this.connection = null; }
+  /** A terminal's new size, kept as its labels half a second after the last change (take attaches at it). */
+  sized(address: string, cols: number, rows: number) {
+    clearTimeout(this.sizes.get(address));
+    this.sizes.set(address, setTimeout(() => { this.sizes.delete(address); void this.connect().then((connection) => connection.call('terminal.label', { terminal: address, labels: { cols: String(cols), rows: String(rows) } })).catch(() => {}); }, 500));
+  }
+  problem(message: string) { this.onProblem?.(message); }
 
-  private async attach(connection: HcConnection, address: string, cols: number, rows: number, first?: (text: string) => void, history = 0) {
+  private async attach(address: string, cols: number, rows: number, first?: (text: string) => void, history = 0) {
+    const connection = await this.connect();
     const facts = await connection.call<Facts>('terminal.get', { terminal: address });
+    const pty = new HerdrPty(this, address, facts.pid ?? 0, cols, rows, first);
     const attached = await connection.call<{ channel: number }>('terminal.attach', { terminal: address, cols, rows, history });
-    return new HerdrPty(connection, attached.channel, address, facts.pid ?? 0, cols, rows, first);
+    pty.bind(connection, attached.channel); return pty;
+  }
+  private coreEnvironment(connection: HcConnection): Promise<string[]> {
+    if (process.platform === 'win32') return Promise.resolve([]);
+    this.coreNames ??= connection.call<{ code: number | null; stdout: string }>('machine.exec', { argv: ['/usr/bin/env', '-0'], timeout: 10 })
+      .then((result) => result.code === 0 ? Buffer.from(result.stdout, 'base64').toString('utf8').split('\0').map((entry) => entry.split('=')[0]).filter((variable) => VARIABLE.test(variable)) : [], () => []);
+    return this.coreNames;
   }
   private leftOver(): Promise<void> {
     this.listed ??= (async () => {
@@ -177,10 +251,15 @@ export class HerdrTerminals implements HeldTerminals {
     })();
     return this.listed;
   }
-  private async connect(): Promise<HcConnection> {
-    if (this.connection && !this.connection.lost) return this.connection;
-    const connection = new HcConnection(this.hc);
-    connection.onLost = () => { if (this.connection === connection) { this.connection = null; this.onProblem?.('herdr-core (hc) went away, so Trace lost hold of the channels it runs there. They may still be running: hc ls lists them.'); } };
-    await connection.ready; this.connection = connection; return connection;
+  /** The connection to hc: one at a time, made once however many ask together, made again after a lost line. */
+  connect(): Promise<HcConnection> {
+    if (this.connection && !this.connection.lost) return Promise.resolve(this.connection);
+    this.connecting ??= (async () => {
+      const connection = new HcConnection(this.hc);
+      // A new line may reach a restarted hc: its terminals are listed again, and its environment read again.
+      connection.onLost = () => { if (this.connection === connection) { this.connection = null; this.listed = null; this.left.clear(); this.coreNames = null; } };
+      await connection.ready; this.connection = connection; return connection;
+    })().finally(() => { this.connecting = null; });
+    return this.connecting;
   }
 }
