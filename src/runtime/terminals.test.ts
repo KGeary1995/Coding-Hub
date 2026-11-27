@@ -13,7 +13,7 @@ const addons: FakeWebgl[] = [];
 class FakeWebgl { disposed = false; loss: (() => void) | null = null; constructor() { addons.push(this); } onContextLoss(listener: () => void) { this.loss = listener; } dispose() { this.disposed = true; } }
 let osc: ((data: string) => boolean) | null = null;
 class FakeTerminal {
-  options: Record<string, unknown> = {}; cols = 80; rows = 24; unicode = { activeVersion: '6' }; parser = { registerOscHandler: (_code: number, handler: (data: string) => boolean) => { osc = handler; } };
+  options: Record<string, unknown> = {}; cols = 80; rows = 24; modes = { bracketedPasteMode: false }; unicode = { activeVersion: '6' }; parser = { registerOscHandler: (_code: number, handler: (data: string) => boolean) => { osc = handler; } };
   loadAddon(addon: unknown) { if (addon instanceof FakeWebgl && failLoads) throw new Error('no WebGL'); }
   open() {} onData() {} onTitleChange() {} onResize() {} attachCustomKeyEventHandler() {} writeln() {} write() {} reset() {} focus() {} dispose() {}
   hasSelection() { return false; } clearSelection() {}
@@ -90,5 +90,19 @@ describe('a request typed into an agent’s terminal', () => {
     expect(await submitTerminal(session.id, 'Fix sum.js')).toBe(true);
     expect(written.map((item) => item.data)).toEqual(['Fix sum.js', '\r']);
     expect(written[1].at - written[0].at).toBeGreaterThanOrEqual(150);
+  });
+  it('goes in as a bracketed paste when the program asked for one, so a long request is still sent by its Enter', async () => {
+    const session = { ...createSession('codex'), status: 'running' as const, runId: 'r2' }; const { terminal } = terminalFor(session) as unknown as { terminal: { modes: { bracketedPasteMode: boolean } } };
+    routeTerminalEvent({ type: 'started', sessionId: session.id, runId: 'r2', engine: 'codex', pid: 1, cwd: '/p' } as never);
+    terminal.modes.bracketedPasteMode = true;
+    // A paste end inside the text cannot end the paste early and type the rest as keys.
+    expect(await submitTerminal(session.id, 'Review this.\nLine two \x1b[201~ echo typed')).toBe(true);
+    expect(written.map((item) => item.data)).toEqual(['\x1b[200~Review this.\nLine two  echo typed\x1b[201~', '\r']);
+  });
+  it('typed as keys, waits longer before a long request\'s Enter (a 4,000-character one stayed in Codex\'s prompt after 200 ms)', async () => {
+    const session = { ...createSession('codex'), status: 'running' as const, runId: 'r3' }; terminalFor(session);
+    routeTerminalEvent({ type: 'started', sessionId: session.id, runId: 'r3', engine: 'codex', pid: 1, cwd: '/p' } as never);
+    expect(await submitTerminal(session.id, 'x'.repeat(4000))).toBe(true);
+    expect(written[1].at - written[0].at).toBeGreaterThanOrEqual(1100);
   });
 });

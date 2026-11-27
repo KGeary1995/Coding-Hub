@@ -313,3 +313,14 @@ export interface GitCommitDetail { sha: string; parents: string[]; author: strin
  * unsent 3 times in 5 (2.1.332, 2026-11-25), and every time sent once the Enter came 200 ms later.
  */
 export const SUBMIT_DELAY_MS = 200;
+/**
+ * A request as it is typed into an agent's terminal: a bracketed paste when the program asked for one (mode 2004), so it
+ * knows where the paste ends and the Enter after it sends, however long the text. A paste end inside the text is
+ * dropped, so the text cannot end the paste early and type the rest as keys.
+ */
+export const typedRequest = (text: string, bracketed: boolean) => bracketed ? `\x1b[200~${text.replace(/\x1b\[20[01]~/g, '')}\x1b[201~` : text;
+/**
+ * How long its Enter waits. Typed as keys, a long request is taken in as one paste burst for longer: 4,000 characters
+ * sent to a Codex terminal (2026-11-27) were still being taken in after 200 ms, so their Enter became a new line.
+ */
+export const submitDelay = (text: string, bracketed: boolean) => bracketed ? SUBMIT_DELAY_MS : Math.min(2000, SUBMIT_DELAY_MS + Math.ceil(text.length / 4));
