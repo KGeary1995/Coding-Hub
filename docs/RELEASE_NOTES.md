@@ -1,5 +1,16 @@
 ## What's new
 
+1.52.0 sends long requests to terminal channels reliably, and adds a trial: terminal channels held by herdr-core.
+
+- **Long requests are sent, not left in the prompt.** A request Trace types into a terminal channel (from another agent's channel tools, a task, a handoff or compact request, Start in order, a scheduled job) now goes in as a paste when the CLI asks for one, as Claude Code and Codex do, so its Enter sends it however long it is. A long one could be left unsent in Codex's prompt.
+- **Trial: channels in herdr-core.** Trace can hold its terminal channels in herdr-core (`hc`, by herdrdev, open source) instead of its own background runner. That lets `hc attach` reach a channel from any terminal, over SSH too, and herdr's phone app may as well (not tried yet).
+  - **Off unless you turn it on:** with herdr-core installed, run `launchctl setenv CODING_HUB_HERDR ~/.local/bin/herdr-core` and reopen Trace.
+  - **To turn it off:** `launchctl unsetenv CODING_HUB_HERDR`, then reopen Trace.
+  - **After restarting your Mac,** run the `setenv` command again: macOS forgets it.
+  - Channels keep running when Trace quits or herdr-core restarts, as with Trace's own runner.
+  - See docs/background-runner.md, section 9.
+- **For developers:** the desktop smoke test's clipboard checks run only on CI or with `CODING_HUB_TEST_CLIPBOARD=1`, because they replace the computer's own clipboard.
+
 1.51.2 is the first Mac release signed with Trace's Developer ID and notarized by Apple, so Macs can update themselves from here on.
 
 - **Macs update themselves.** Mac releases until now were ad-hoc signed, so a Mac could not install an update by itself. Settings → Application updates said **Manual updates**, and install on quit (1.51.0) never ran there. From 1.51.2 the Mac apps are signed and notarized, so macOS opens them without the Privacy & Security step.
