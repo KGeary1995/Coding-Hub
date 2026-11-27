@@ -18,6 +18,9 @@ describe('a channel’s project (several projects, step 6)', () => {
     const all = [channel('a'), channel('b', { mode: 'independent', cwd: '/code/beta' }), channel('c', { mode: 'independent', cwd: '/code/beta' }), channel('w', { mode: 'independent', cwd: tree.directory })];
     expect(all.filter((item) => inActiveProject(item, '/code/alpha', [tree])).map((item) => item.id)).toEqual(['a', 'w']);
     expect(otherProjects(all, '/code/alpha', [tree])).toEqual([{ folder: '/code/beta', channels: 2 }]);
+    // Under All projects the open one is listed first, as one to go back to (it was missing from the menu).
+    expect(otherProjects(all, '/code/alpha', [tree], true)[0]).toEqual({ folder: '/code/alpha', channels: all.filter((session) => inActiveProject(session, '/code/alpha', [tree])).length });
+    expect(otherProjects([], '/code/alpha', [], true)).toEqual([{ folder: '/code/alpha', channels: 0 }]);
     // No project open: every channel shows.
     expect(all.every((item) => inActiveProject(item, null, []))).toBe(true);
   });

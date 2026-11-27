@@ -505,6 +505,10 @@ const { NO_DRIVE } = require('./lib/no-drive.cjs');
     await restored.waitForFunction(() => document.querySelectorAll('.session-tile').length === 2);
     // The project button says so, not the open project's name (it did up to 1.48.0).
     assert.equal(await restored.getByRole('button', { name: /^Project / }).first().getAttribute('aria-label'), 'Project All projects');
+    // Its menu lists the open project too, to go back to (it was missing up to 1.51.0).
+    await restored.getByRole('button', { name: /^Project /, exact: false }).first().click();
+    assert.equal(await restored.getByRole('menuitem').filter({ hasText: projects[0] }).count(), 1);
+    await restored.keyboard.press('Escape'); await restored.getByRole('menu').waitFor({ state: 'hidden' });
     assert.equal(await restored.getByRole('button', { name: 'Start channel', exact: true }).count(), 2);
     const saved = await restored.evaluate(() => window.codingHub.loadWorkspace());
     assert.equal(saved.ok, true);

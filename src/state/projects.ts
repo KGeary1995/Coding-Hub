@@ -45,9 +45,13 @@ export function channelProject(session: Session, rootDirectory: string | null, w
 }
 /** Shown in the grid: its project is the active one (with no project open, every channel is). */
 export const inActiveProject = (session: Session, rootDirectory: string | null, worktrees: readonly ManagedWorktree[]) => { const project = channelProject(session, rootDirectory, worktrees); return !rootDirectory || !project || within(project, rootDirectory); };
-/** The other projects that have channels, each once, with how many (for the project menu). */
-export function otherProjects(channels: Session[], rootDirectory: string | null, worktrees: readonly ManagedWorktree[]): { folder: string; channels: number }[] {
+/**
+ * The other projects that have channels, each once, with how many (for the project menu). `withOpen`: the open one first
+ * too, with or without channels: under All projects the button names no project, so it is one to go back to.
+ */
+export function otherProjects(channels: Session[], rootDirectory: string | null, worktrees: readonly ManagedWorktree[], withOpen = false): { folder: string; channels: number }[] {
   const counts = new Map<string, { folder: string; channels: number }>();
+  if (withOpen && rootDirectory) counts.set(clean(rootDirectory), { folder: rootDirectory, channels: channels.filter((session) => inActiveProject(session, rootDirectory, worktrees)).length });
   for (const session of channels) { if (inActiveProject(session, rootDirectory, worktrees)) continue; const folder = channelProject(session, rootDirectory, worktrees); if (!folder) continue; const key = clean(folder); counts.set(key, { folder, channels: (counts.get(key)?.channels ?? 0) + 1 }); }
   return [...counts.values()];
 }

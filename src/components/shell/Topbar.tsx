@@ -74,12 +74,13 @@ export function Topbar({ explorer, onToggleExplorer }: { explorer: boolean; onTo
   const allProjects = useAllProjects((state) => state.on); const project = projectLabel(rootDirectory, allProjects);
   // The project menu opens a recent project in one press (several projects, step 4); the open one is not listed.
   const recent = useHubStore((state) => state.preferences.recentProjects) ?? []; const worktrees = useWorktrees((state) => state.list); const synced = useSyncedProjects((state) => state.list); const cloneError = useSyncedProjects((state) => state.error);
-  // The other projects with channels first (the grid shows only the active project's), then the recent ones.
-  const withChannels = otherProjects(channelsOf(sessions), rootDirectory, worktrees);
+  // The other projects with channels first (the grid shows only the active project's), then the recent ones. Under All
+  // projects the open one is listed too: the button names none, and picking it shows only its channels again.
+  const withChannels = otherProjects(channelsOf(sessions), rootDirectory, worktrees, allProjects);
   const pickProject = openProject;
   const recentItems: MenuItem[] = [
     ...(withChannels.length || allProjects ? [{ label: 'All projects', detail: allProjects ? 'Every project’s channels are shown' : 'Show every project’s channels at once', icon: <Folder size={16} aria-hidden="true" />, current: allProjects, onSelect: () => setAllProjects(!allProjects) }] : []),
-    ...withChannels.map(({ folder, channels }) => ({ label: folderName(folder), detail: `${channels} ${channels === 1 ? 'channel' : 'channels'} · ${folder}`, icon: <Folder size={16} aria-hidden="true" />, onSelect: () => pickProject(folder) })),
+    ...withChannels.map(({ folder, channels }) => ({ label: folderName(folder), detail: `${channels ? `${channels} ${channels === 1 ? 'channel' : 'channels'}` : 'No channels'} · ${folder}`, icon: <Folder size={16} aria-hidden="true" />, onSelect: () => pickProject(folder) })),
     ...(cloneError ? [{ label: 'Clone failed', detail: cloneError, onSelect: () => useSyncedProjects.setState({ error: null }) }] : []),
     ...synced.map((item) => ({ label: item.name, detail: `On ${item.machine} · ${item.repository} · clone here`, icon: <Folder size={16} aria-hidden="true" />, onSelect: () => void cloneSyncedProject(item).catch(() => {}) })),
     ...recent.filter((directory) => directory !== rootDirectory && !withChannels.some((item) => within(item.folder, directory) && within(directory, item.folder))).slice(0, 10).map((directory) => ({ label: folderName(directory), detail: directory, icon: <Folder size={16} aria-hidden="true" />, onSelect: () => pickProject(directory) })),
