@@ -971,7 +971,7 @@ let relaunching = false;
 // Opening Trace again (Start menu, shortcut, Dock) while it runs shows the window it already has, instead of nothing.
 // While it is quitting (saving memory summaries can take seconds after the window is gone), it opens again afterwards.
 app.on('second-instance', (_event, argv) => {
-  if (quitting) { if (!updateRestart && !scriptUpdate) reopenAfterQuit = true; return; }
+  if (quitting) { if (!updateRestart && !scriptUpdate) { reopenAfterQuit = true; updates?.reopenAfterInstall(); } return; }
   // Started hidden (at sign-in, or by another computer through the screen service) while Trace runs: nothing to show.
   if (argv.includes('--hidden')) return;
   if (!window || window.isDestroyed()) return; showWindow();
@@ -1410,6 +1410,7 @@ It runs without a shell. Save it only if you trust this program.` })).response =
     disabledReason: process.platform === 'darwin' && app.isPackaged ? 'This Mac copy is not signed with Trace\'s Developer ID, so it cannot update itself. Install the latest version from the downloads page once; later versions then update themselves.' : 'Automatic updates require the installed Windows edition. Source and portable editions are updated manually.',
     openDownloads: () => shell.openExternal(DOWNLOADS_URL),
     storageDirectory: storageRoot,
+    platform: process.platform,
     updater: autoUpdater,
     publish: (status) => { sendToRenderer(IPC_CHANNELS.updateStatus, status); },
     hasSessions: () => busyJobs(),
@@ -1557,7 +1558,7 @@ It runs without a shell. Save it only if you trust this program.` })).response =
     } catch { hostHealth?.record('usage-alerts-failed'); }
   })); }, 60000);
   // On a Mac, opening Trace from the Dock or Finder while it quits raises this, not second-instance: it opens afterwards.
-  app.on('activate', () => { if (TEST_HIDDEN) return; if (quitting) { if (!updateRestart && !scriptUpdate) reopenAfterQuit = true; return; } if (BrowserWindow.getAllWindows().length === 0) createWindow(); else showWindow(); });
+  app.on('activate', () => { if (TEST_HIDDEN) return; if (quitting) { if (!updateRestart && !scriptUpdate) { reopenAfterQuit = true; updates?.reopenAfterInstall(); } return; } if (BrowserWindow.getAllWindows().length === 0) createWindow(); else showWindow(); });
 }).catch(() => {
   // Without this, a failure while starting left Trace running with no window, and opening it again showed nothing.
   hostHealth?.record('host-start-failed');
@@ -1574,16 +1575,19 @@ app.on('before-quit', (event) => {
   try { saveResume(storageRoot, hub?.preferences().resumeOnStart === false ? [] : manager.running().map((run) => run.sessionId)); } catch { hostHealth?.record('resume-list-failed'); }
   // Where today's usage was read to, so the next start reads only what the logs gain (never rejects).
   const savingUsage = dayUsage.save();
+  // Channels the background runner keeps running after this quit (read as they close to new starts): a Mac installs a
+  // downloaded update only without them.
+  let kept = false; let leftBehind = false;
   // Channels in the background runner keep running (Trace takes them up when it opens), unless the tray's Stop all
   // channels and quit was chosen.
-  void flushWorkspace().then(() => Promise.all([manager.dispose(stopChannelsOnQuit || !background), accounts.close()])).then(() => background?.close()).catch(() => hostHealth?.record('shutdown-stop-failed'))
+  void flushWorkspace().then(() => { kept = !stopChannelsOnQuit && Boolean(background) && manager.hasHeldSessions; return Promise.all([manager.dispose(stopChannelsOnQuit || !background), accounts.close()]); }).then(() => background?.close()).catch(() => hostHealth?.record('shutdown-stop-failed'))
     .then(async () => {
       // Quitting would leave these running with nothing to control them; let the person decide.
       const left = [...manager.processIds(), ...accounts.processIds()];
       if (!left.length) return true;
       hostHealth?.record('shutdown-processes-left', String(left.length));
       const choice = await leftRunningChoice(window && !window.isDestroyed() ? window : null, left, 'Quit anyway', 'Keep Trace open');
-      if (choice === 'quit') return true;
+      if (choice === 'quit') { leftBehind = true; return true; }
       quitting = false; manager.reopen(); accounts.reopen();
       // Trying again keeps a request to reopen, so the relaunch after that quit still happens.
       if (choice === 'retry') { app.quit(); return false; }
@@ -1598,6 +1602,17 @@ app.on('before-quit', (event) => {
     // Then those summaries reach Drive, or another computer starts without them.
     await hub?.drain(5000)?.catch(() => hostHealth?.record('shutdown-stop-failed')); await savingUsage;
     try { mainStalls.stop(); screens?.closeAll(); linked?.stop(); void remote?.stop(); attention.close(); channelTools.close(); appPreview.dispose(); plugins?.close(); pluginApi?.close(); tray?.destroy(); tray = null; modelCatalog.close(); projectChecks?.stop(); verification?.cancel(); updates?.close(); hub?.close(); storage?.close(); hostHealth?.close(); }
-    finally { if (reopenAfterQuit && !relaunching && !updateRestart && !scriptUpdate) app.relaunch(); app.quit(); }
+    finally {
+      const reopening = reopenAfterQuit && !relaunching && !updateRestart && !scriptUpdate;
+      // A downloaded update installs now (Install when Trace quits), unless something was left running, Trace opens
+      // again at once, this quit is itself a restart, or Share this screen is on (the installer would stop its service,
+      // and only Trace starts it again). On a Mac the updater quits once Squirrel has it; if it fails, or has not within
+      // a minute, Trace quits anyway, opening again if asked to meanwhile.
+      const giveUp = () => { if (reopenAfterQuit && !relaunching) app.relaunch(); app.quit(); };
+      let installing = false; try { installing = Boolean(updates?.quitting({ safe: !leftBehind && !reopening && !relaunching && !updateRestart && !scriptUpdate && !screenShare?.shared, kept, giveUp })); } catch { /* Quits as usual; the update stays for Restart and install. */ }
+      if (reopening) app.relaunch();
+      // Its windows go while Squirrel fetches the update: storage is closed, so nothing done in them would be kept.
+      if (installing) { for (const open of BrowserWindow.getAllWindows()) if (!open.isDestroyed()) open.destroy(); setTimeout(giveUp, 60_000); } else app.quit();
+    }
   });
 });

@@ -104,6 +104,8 @@ export class ScreenShare {
   /** Versions of a service already replaced once, so one that comes back the same is not ended every minute. */
   private replaced = new Set<string>();
   get supported() { return process.platform === 'win32'; }
+  /** Share this screen is on: its service runs from the install folder, which an installer stops (main.ts, install on quit). */
+  get shared() { return this.supported && shareSetting(this.root).enabled; }
 
   async status(): Promise<ScreenShareStatus> {
     const setting = shareSetting(this.root);
