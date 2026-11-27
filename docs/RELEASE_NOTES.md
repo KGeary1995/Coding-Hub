@@ -1,5 +1,11 @@
 ## What's new
 
+1.51.2 is the first Mac release signed with Trace's Developer ID and notarized by Apple, so Macs can update themselves from here on.
+
+- **Macs update themselves.** Mac releases until now were ad-hoc signed, so a Mac could not install an update by itself. Settings → Application updates said **Manual updates**, and install on quit (1.51.0) never ran there. From 1.51.2 the Mac apps are signed and notarized, so macOS opens them without the Privacy & Security step.
+  - **Install this version on each Mac from the downloads page, this once.** An ad-hoc copy cannot install a signed update. After that, Trace downloads updates by itself and installs them when you quit (with no channels left running in the background) or with **Restart and install**.
+- **Windows** is unchanged.
+
 1.51.1 fixes the project menu under All projects.
 
 - **The open project is in the project menu again under All projects.** With All projects on, the menu left out the project that was open, so there was no way back to it from there. It is now listed first, with its channels; picking it shows only its channels again.
