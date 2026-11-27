@@ -49,7 +49,7 @@ describe('a herdr-core terminal (no hc needed)', () => {
     for (const runId of ['9ff84db7-5c1c-465c-96b1-7f2d1bc7c75a', 'a0230e3a-e8c1-4ebb-b41d-f49dff53356f']) expect(docName(runId)).toMatch(/^trace-[0-9a-f]{26}$/);
   });
   it('tells an exit that came before anyone listened to the first listener (while a channel was being taken up)', async () => {
-    const pty = new HerdrPty({ connect: () => Promise.reject(new Error('unused')), sized: () => {}, problem: () => {} }, 't1', 5, 80, 24);
+    const pty = new HerdrPty({ connect: () => Promise.reject(new Error('unused')), sized: () => {}, problem: () => {}, disposed: false }, 't1', 5, 80, 24);
     pty.wrote('last screen'); pty.end({ exitCode: 4 });
     let seen = ''; pty.onData((text) => { seen += text; }); const exit = await new Promise((resolve) => pty.onExit(resolve));
     expect(exit).toEqual({ exitCode: 4 }); expect(seen).toBe('last screen');
@@ -60,7 +60,8 @@ describe('a herdr-core terminal (no hc needed)', () => {
 describe.skipIf(!hc)('herdr-core terminals, what an audit found', () => {
   const meta = (cwd: string) => ({ session: { sessionId: randomUUID(), runId: randomUUID(), engine: 'shell', cwd, pid: 0 }, config: { engine: 'shell' } }) as unknown as HeldMeta;
   const folder = () => fs.mkdtempSync(path.join(os.tmpdir(), 'trace-herdr-'));
-  const remove = (cwd: string) => fs.rmSync(cwd, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
+  // A temp folder Windows still holds (a shell there not ended yet) is left, not a failure.
+  const remove = (cwd: string) => { try { fs.rmSync(cwd, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 }); } catch { /* Left in the temp folder. */ } };
   it.skipIf(windows)('does not give a program a variable Trace left out, though hc\'s own environment has it', { timeout: 30_000 }, async () => {
     const cwd = folder(); const terminals = new HerdrTerminals(hc!);
     try {
@@ -70,9 +71,15 @@ describe.skipIf(!hc)('herdr-core terminals, what an audit found', () => {
       const names = await (terminals as unknown as { coreEnvironment(connection: unknown): Promise<string[]>; connect(): Promise<unknown> }).coreEnvironment(await (terminals as unknown as { connect(): Promise<unknown> }).connect());
       const left = names.find((name) => !own.has(name) && !name.startsWith('HC_')); expect(left).toBeDefined();
       const env = Object.fromEntries(Object.entries({ ...process.env, PS1: '$ ' } as Record<string, string>).filter(([name]) => name !== left));
-      const pty = await terminals.spawn('/bin/sh', [], { cwd, cols: 80, rows: 24, env }, meta(cwd));
-      let seen = ''; pty.onData((text) => { seen += text; }); pty.write(`printenv ${left} || echo "[${left} unset]"\r`);
-      expect(await until(() => seen.includes(`[${left} unset]`))).toBe(true); pty.write('exit\r');
+      // The marker is worked out by the shell ([42…]): the command as typed, echoed back, shows $((6*7)) instead.
+      const check = async (given: Record<string, string>) => {
+        const pty = await terminals.spawn('/bin/sh', [], { cwd, cols: 120, rows: 24, env: given }, meta(cwd));
+        let seen = ''; pty.onData((text) => { seen += text; }); pty.write(`printenv ${left} >/dev/null && echo "[$((6*7))set]" || echo "[$((6*7))unset]"\r`);
+        await until(() => /\[42(un)?set\]/.test(seen)); pty.write('exit\r'); return /\[42unset\]/.test(seen) ? 'unset' : /\[42set\]/.test(seen) ? 'set' : 'unknown';
+      };
+      expect(await check(env)).toBe('unset');
+      // And given, it is there (the check can tell).
+      expect(await check({ ...env, [left!]: 'given' })).toBe('set');
     } finally { terminals.close(); remove(cwd); }
   });
   it('gives a program that ends before it is attached its exit, and never fails (PtyManager would run it again)', { timeout: 60_000 }, async () => {
@@ -103,6 +110,38 @@ describe.skipIf(!hc)('herdr-core terminals, what an audit found', () => {
         const sizes = await Promise.all(kept.map(async (id) => { const taken = await again.take(id); const size = taken ? `${taken.pty.cols}x${taken.pty.rows}` : 'none'; taken?.pty.write('exit\r'); return size; }));
         expect(sizes).toContain('70x17'); expect(sizes).toContain('90x20');
       } finally { again.close(); }
+    } finally { first.close(); remove(cwd); }
+  });
+  it('keeps a size changed just before Trace lets go of hc, and attaches nothing again once it has', { timeout: 60_000 }, async () => {
+    const cwd = folder(); const first = new HerdrTerminals(hc!); const options = { cwd, cols: 90, rows: 20, env: { ...process.env, PS1: '$ ' } as Record<string, string> };
+    try {
+      const pty = await first.spawn(shell.file, shell.args, options, meta(cwd));
+      // Resized and closed at once (within the half second sizes wait): the new size is still kept.
+      pty.resize(70, 17); first.close();
+      // Its line was lost while a new one was being made: closing ends that recovery, nothing is attached again.
+      const lineOf = () => (pty as unknown as { connection: unknown }).connection; const before = lineOf();
+      await new Promise((resolve) => setTimeout(resolve, 2500));
+      expect(lineOf()).toBe(before); expect((first as unknown as { connection: unknown }).connection).toBeNull();
+      const again = new HerdrTerminals(hc!);
+      try {
+        const kept = await again.kept(); const sizes: string[] = [];
+        for (const id of kept) { const taken = await again.take(id); if (taken) { sizes.push(`${taken.pty.cols}x${taken.pty.rows}`); taken.pty.write('exit\r'); } }
+        expect(sizes).toContain('70x17');
+      } finally { again.close(); }
+    } finally { first.close(); remove(cwd); }
+  });
+  it('ends a recovery that was under way when Trace lets go of hc', { timeout: 60_000 }, async () => {
+    const cwd = folder(); const first = new HerdrTerminals(hc!);
+    try {
+      const pty = await first.spawn(shell.file, shell.args, { cwd, cols: 80, rows: 24, env: process.env as Record<string, string> }, meta(cwd));
+      const line = (pty as unknown as { connection: { child: { kill(): void } } }).connection; line.child.kill();
+      // As soon as a new line is being made (the recovery), Trace lets go of hc.
+      // Looked for on every turn of the event loop: a new line is made in well under the 100 ms until() waits.
+      for (const end = Date.now() + 5000; !(first as unknown as { connecting: unknown }).connecting && Date.now() < end;) await new Promise((resolve) => setImmediate(resolve));
+      expect((first as unknown as { connecting: unknown }).connecting).toBeTruthy(); first.close();
+      await new Promise((resolve) => setTimeout(resolve, 2500));
+      expect((pty as unknown as { connection: unknown }).connection).toBe(line); expect((first as unknown as { connection: unknown }).connection).toBeNull();
+      const again = new HerdrTerminals(hc!); try { for (const id of await again.kept()) (await again.take(id))?.pty.write('exit\r'); } finally { again.close(); }
     } finally { first.close(); remove(cwd); }
   });
 });

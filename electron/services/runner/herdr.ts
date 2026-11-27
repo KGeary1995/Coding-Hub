@@ -1,7 +1,7 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import type { IPty, IPtyForkOptions } from 'node-pty';
 import type { HeldMeta, HeldTerminals } from '../cli/pty-manager';
-import { withoutAgentSession } from '../cli/discovery';
+import { AGENT_SESSION, withoutAgentSession } from '../cli/discovery';
 
 /**
  * Trial (2026-11-27, the owner's request): channels' terminals held by herdr-core (`hc`, github.com/herdrdev/herdr-core,
@@ -13,6 +13,8 @@ import { withoutAgentSession } from '../cli/discovery';
 const FRAME = { data: 0, credit: 1, close: 2, resize: 3 } as const;
 /** How far ahead hc may send a terminal's output (bytes not yet read): PtyManager's HIGH_WATER. */
 const WINDOW = 1024 * 1024;
+/** How long a line Trace ends keeps hc connect to deliver what was written last (a size, close) before it is ended. */
+const CLOSE_GRACE_MS = 1500;
 /** hc's protocol generation this speaks (hello). */
 const GENERATION = 1;
 type Listener<T> = (value: T) => void;
@@ -29,8 +31,9 @@ class HcConnection {
     this.child = spawn(hc, ['connect'], { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true, env: withoutAgentSession(process.env as Record<string, string>) });
     this.child.stdout.on('data', (chunk: Buffer) => this.received(chunk));
     this.child.stderr.on('data', () => { /* hc's own diagnostics; its core.log keeps them. */ });
-    const gone = () => { if (this.lost) return; this.lost = true; for (const waiting of this.pending.values()) waiting.reject(new Error('hc connect ended.')); this.pending.clear(); for (const stream of this.streams.values()) stream.closed('lost'); this.streams.clear(); this.onLost?.(); };
-    this.child.on('exit', gone); this.child.on('error', gone);
+    const gone = this.gone = () => { if (this.lost) return; this.lost = true; for (const waiting of this.pending.values()) waiting.reject(new Error('hc connect ended.')); this.pending.clear(); for (const stream of this.streams.values()) stream.closed('lost'); this.streams.clear(); this.onLost?.(); };
+    // A write after hc connect ended (EPIPE, write after end) is an error on stdin: the line is lost, not a crash.
+    this.child.on('exit', gone); this.child.on('error', gone); this.child.stdin.on('error', gone); this.child.stdout.on('error', gone);
     this.ready = this.call('hello', { framed: true, generation: GENERATION }).then(() => undefined);
   }
   call<T = unknown>(method: string, params: Record<string, unknown>): Promise<T> {
@@ -38,10 +41,12 @@ class HcConnection {
     const id = this.next++; const message = Buffer.from(JSON.stringify({ jsonrpc: '2.0', id, method, params }));
     const answer = new Promise<T>((resolve, reject) => this.pending.set(id, { resolve: resolve as (value: unknown) => void, reject }));
     // Plain mode until hello's answer: one message a line; framed after.
-    if (method === 'hello' || !this.framed) this.child.stdin.write(Buffer.concat([message, Buffer.from('\n')])); else this.frame(0, FRAME.data, message);
+    if (method === 'hello' || !this.framed) this.write(Buffer.concat([message, Buffer.from('\n')])); else this.frame(0, FRAME.data, message);
     return answer;
   }
-  frame(channel: number, kind: number, payload: Buffer) { if (this.lost) return; const head = Buffer.alloc(9); head.writeUInt32LE(channel, 0); head.writeUInt8(kind, 4); head.writeUInt32LE(payload.length, 5); this.child.stdin.write(Buffer.concat([head, payload])); }
+  frame(channel: number, kind: number, payload: Buffer) { if (this.lost) return; const head = Buffer.alloc(9); head.writeUInt32LE(channel, 0); head.writeUInt8(kind, 4); head.writeUInt32LE(payload.length, 5); this.write(Buffer.concat([head, payload])); }
+  /** To hc connect while its stdin takes writes; once lost or closed, nothing more is written. */
+  private write(bytes: Buffer) { if (!this.lost && this.child.stdin.writable) this.child.stdin.write(bytes); }
   /** A stream's first frames can come in the same read as attach's answer, before its HerdrPty exists: kept for it. */
   private early = new Map<number, { data: Buffer[]; closed?: string }>();
   stream(channel: number, data: (bytes: Buffer) => void, closed: (reason: string) => void) {
@@ -49,7 +54,12 @@ class HcConnection {
     for (const bytes of early?.data ?? []) data(bytes);
     if (early?.closed !== undefined) { this.streams.delete(channel); closed(early.closed); }
   }
-  close() { this.child.stdin.end(); this.child.kill(); }
+  /**
+   * Ends the line on purpose (Trace letting go of hc): its terminals keep running in hc, and are not attached again
+   * (their streams are dropped before the line is marked lost), and nothing is written after it.
+   */
+  close() { this.streams.clear(); this.early.clear(); this.gone?.(); this.child.stdin.end(); setTimeout(() => this.child.kill(), CLOSE_GRACE_MS).unref?.(); }
+  private gone?: () => void;
   private answer(message: { id?: number; result?: unknown; error?: { message?: string; data?: unknown } }) {
     const waiting = message.id === undefined ? undefined : this.pending.get(message.id); if (!waiting) return; this.pending.delete(message.id!);
     if (message.error) waiting.reject(new Error(`hc: ${message.error.message ?? 'error'} ${JSON.stringify(message.error.data ?? '')}`)); else waiting.resolve(message.result);
@@ -74,7 +84,7 @@ class HcConnection {
 }
 
 /** What HerdrPty needs of HerdrTerminals: the connection now (a new one after a lost line), and where sizes are kept. */
-interface PtyOwner { connect(): Promise<HcConnection>; sized(address: string, cols: number, rows: number): void; problem(message: string): void }
+interface PtyOwner { connect(): Promise<HcConnection>; sized(address: string, cols: number, rows: number): void; problem(message: string): void; readonly disposed: boolean }
 type Exit = { exitCode: number; signal?: number };
 
 /**
@@ -139,16 +149,20 @@ export class HerdrPty {
    * and the person told the program may still run there.
    */
   private async closed() {
+    // Trace let go of hc (closing): nothing is attached again, and the program keeps running there.
     for (let attempt = 0; attempt < 6 && !this.ended; attempt++) {
+      if (this.owner.disposed) return;
       if (attempt) await new Promise((resolve) => setTimeout(resolve, 500 * attempt));
       try {
+        if (this.owner.disposed) return;
         const connection = await this.owner.connect(); const facts = await connection.call<Facts>('terminal.get', { terminal: this.address });
         if (facts.state !== 'live') { this.end(exitOf(facts)); return; }
         const attached = await connection.call<{ channel: number }>('terminal.attach', { terminal: this.address, cols: this.cols, rows: this.rows });
+        if (this.owner.disposed) return;
         this.bind(connection, attached.channel); return;
       } catch { /* hc not back yet: tried again. */ }
     }
-    if (!this.ended) { this.owner.problem(`Trace lost its line to herdr-core for terminal ${this.address}. Its program may still be running there: hc ls lists it.`); this.end({ exitCode: 1 }); }
+    if (!this.ended && !this.owner.disposed) { this.owner.problem(`Trace lost its line to herdr-core for terminal ${this.address}. Its program may still be running there: hc ls lists it.`); this.end({ exitCode: 1 }); }
   }
 }
 const exitOf = (facts: Facts): Exit => ({ exitCode: facts.exit_code ?? 1, ...(facts.signal ? { signal: facts.signal } : {}) });
@@ -168,14 +182,18 @@ export class HerdrTerminals implements HeldTerminals, PtyOwner {
   private left = new Map<string, Facts>(); private listed: Promise<void> | null = null;
   /** The names in hc's own environment (Unix), which a terminal would inherit unless unset (spawn). */
   private coreNames: Promise<string[]> | null = null;
-  private sizes = new Map<string, ReturnType<typeof setTimeout>>();
+  /** Sizes not yet kept as labels (sized), by terminal: kept at once when Trace lets go of hc (close). */
+  private sizes = new Map<string, { timer: ReturnType<typeof setTimeout>; cols: number; rows: number }>();
+  /** Trace let go of hc (close): no new line, and no terminal attached again. */
+  disposed = false;
+  private warnedWindows = false;
   meta?: (meta: HeldMeta) => Record<string, unknown>;
   onProblem?: (message: string) => void;
   constructor(private hc: string) {}
 
   async spawn(file: string, args: string[], options: IPtyForkOptions, meta: HeldMeta): Promise<IPty> {
     const connection = await this.connect(); const cols = options.cols ?? 80; const rows = options.rows ?? 24;
-    const env = (options.env ?? {}) as Record<string, string>;
+    const env = { ...(options.env ?? {}) } as Record<string, string>;
     const name = docName(meta.session.runId); const kept = await connection.call<{ version: number }>('doc.get', { name });
     await connection.call('doc.set', { name, value: { ...meta, ...this.meta?.(meta) }, version: kept.version ?? 0 });
     // hc lays the environment given over its own, so a variable Trace left out (an agent session's, withoutAgentSession)
@@ -183,7 +201,12 @@ export class HerdrTerminals implements HeldTerminals, PtyOwner {
     // each such name (names only, never values, on its command line). Windows has no such command; hc connect starts
     // a core with Trace's own cleaned environment (HcConnection).
     const unset = (await this.coreEnvironment(connection)).filter((variable) => !(variable in env) && !variable.startsWith('HC_'));
-    const argv = unset.length ? ['/usr/bin/env', ...unset.flatMap((variable) => ['-u', variable]), file, ...args] : [file, ...args];
+    // Windows has no env -u: an agent session's variables are given empty instead (read as not set by a check for
+    // a value), and the person told once that hc started inside an agent should be restarted from a clean terminal.
+    const windows = process.platform === 'win32'; const emptied = windows ? unset.filter((variable) => AGENT_SESSION.test(variable)) : [];
+    if (emptied.length && !this.warnedWindows) { this.warnedWindows = true; this.problem(`herdr-core was started inside an agent (it has ${emptied.slice(0, 3).join(', ')}): Trace gives them empty to the channels it starts there. Run hc server restart --fresh from a terminal outside any agent to start it clean.`); }
+    if (emptied.length) Object.assign(env, Object.fromEntries(emptied.map((variable) => [variable, ''])));
+    const argv = unset.length && !windows ? ['/usr/bin/env', ...unset.flatMap((variable) => ['-u', variable]), file, ...args] : [file, ...args];
     // The size is kept as labels (updated on each resize, sized): with no viewer hc sets a terminal to its headless size
     // (200 by 120), and a screen painted at that size would be scrolled out of a tile taken up again.
     const run = await connection.call<{ address: string }>('terminal.run', { argv, cwd: options.cwd ?? process.cwd(), env, size: { cols, rows }, labels: { trace: '1', session: meta.session.sessionId, run: meta.session.runId, cols: String(cols), rows: String(rows) }, no_parent: true, no_notify: true });
@@ -222,11 +245,17 @@ export class HerdrTerminals implements HeldTerminals, PtyOwner {
   /** The channels whose terminals kept running while Trace was closed. */
   async kept(): Promise<string[]> { await this.leftOver(); return [...this.left.keys()]; }
   /** Lets go of hc, which keeps every terminal running. */
-  close() { for (const timer of this.sizes.values()) clearTimeout(timer); this.sizes.clear(); this.connection?.close(); this.connection = null; }
+  close() {
+    this.disposed = true; const connection = this.connection && !this.connection.lost ? this.connection : null;
+    // A size not yet kept is kept now, on the line about to end (it has a moment to deliver it: CLOSE_GRACE_MS).
+    for (const [address, pending] of this.sizes) { clearTimeout(pending.timer); if (connection) void connection.call('terminal.label', { terminal: address, labels: { cols: String(pending.cols), rows: String(pending.rows) } }).catch(() => {}); }
+    this.sizes.clear(); this.connection?.close(); this.connection = null;
+  }
   /** A terminal's new size, kept as its labels half a second after the last change (take attaches at it). */
   sized(address: string, cols: number, rows: number) {
-    clearTimeout(this.sizes.get(address));
-    this.sizes.set(address, setTimeout(() => { this.sizes.delete(address); void this.connect().then((connection) => connection.call('terminal.label', { terminal: address, labels: { cols: String(cols), rows: String(rows) } })).catch(() => {}); }, 500));
+    clearTimeout(this.sizes.get(address)?.timer);
+    const timer = setTimeout(() => { this.sizes.delete(address); void this.connect().then((connection) => connection.call('terminal.label', { terminal: address, labels: { cols: String(cols), rows: String(rows) } })).catch(() => {}); }, 500);
+    this.sizes.set(address, { timer, cols, rows });
   }
   problem(message: string) { this.onProblem?.(message); }
 
@@ -237,10 +266,11 @@ export class HerdrTerminals implements HeldTerminals, PtyOwner {
     const attached = await connection.call<{ channel: number }>('terminal.attach', { terminal: address, cols, rows, history });
     pty.bind(connection, attached.channel); return pty;
   }
+  /** The names in hc's own environment: env -0 on Unix, cmd's set on Windows. */
   private coreEnvironment(connection: HcConnection): Promise<string[]> {
-    if (process.platform === 'win32') return Promise.resolve([]);
-    this.coreNames ??= connection.call<{ code: number | null; stdout: string }>('machine.exec', { argv: ['/usr/bin/env', '-0'], timeout: 10 })
-      .then((result) => result.code === 0 ? Buffer.from(result.stdout, 'base64').toString('utf8').split('\0').map((entry) => entry.split('=')[0]).filter((variable) => VARIABLE.test(variable)) : [], () => []);
+    const windows = process.platform === 'win32';
+    this.coreNames ??= connection.call<{ code: number | null; stdout: string }>('machine.exec', { argv: windows ? ['cmd.exe', '/d', '/c', 'set'] : ['/usr/bin/env', '-0'], timeout: 10 })
+      .then((result) => result.code === 0 ? Buffer.from(result.stdout, 'base64').toString('utf8').split(windows ? /\r?\n/ : '\0').map((entry) => entry.split('=')[0]).filter((variable) => VARIABLE.test(variable)) : [], () => []);
     return this.coreNames;
   }
   private leftOver(): Promise<void> {
@@ -251,14 +281,18 @@ export class HerdrTerminals implements HeldTerminals, PtyOwner {
     })();
     return this.listed;
   }
-  /** The connection to hc: one at a time, made once however many ask together, made again after a lost line. */
+  /** The connection to hc: one at a time, made once however many ask together, made again after a lost line; none once closed. */
   connect(): Promise<HcConnection> {
+    if (this.disposed) return Promise.reject(new Error('Trace let go of herdr-core.'));
     if (this.connection && !this.connection.lost) return Promise.resolve(this.connection);
     this.connecting ??= (async () => {
       const connection = new HcConnection(this.hc);
       // A new line may reach a restarted hc: its terminals are listed again, and its environment read again.
       connection.onLost = () => { if (this.connection === connection) { this.connection = null; this.listed = null; this.left.clear(); this.coreNames = null; } };
-      await connection.ready; this.connection = connection; return connection;
+      await connection.ready;
+      // Closed while this line was being made (a recovery in flight): ended at once, never kept.
+      if (this.disposed) { connection.close(); throw new Error('Trace let go of herdr-core.'); }
+      this.connection = connection; return connection;
     })().finally(() => { this.connecting = null; });
     return this.connecting;
   }
