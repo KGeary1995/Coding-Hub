@@ -126,3 +126,19 @@ Each step is its own release.
 
 1. **Quitting.** Answered 2026-11-24: Quit leaves channels running in the background until the owner stops them; Trace reattaches next time. Stopping is a channel's own Stop, or **Stop all channels** in the tray menu.
 2. **The native helper.** Answered 2026-11-24: shipping a small compiled helper for Windows job objects is acceptable.
+
+## 9. Trial: herdr-core itself instead of the runner (`CODING_HUB_HERDR`, 2026-11-27)
+
+At the owner's request, Trace can hold its terminal channels in herdr-core (`hc`, github.com/herdrdev/herdr-core, Apache-2.0) instead of its own runner. With herdr-core's own server holding them, `hc attach` from any terminal, or over SSH, can reach a channel, and herdr's phone app may too (not tried).
+
+- **On:** the environment Trace starts with names an absolute path to `hc` as `CODING_HUB_HERDR`. For an installed Mac app, run `launchctl setenv CODING_HUB_HERDR ~/.local/bin/herdr-core`, then reopen Trace; `launchctl unsetenv CODING_HUB_HERDR` turns it off. The window can never set it. It is off unless set, and nothing changes then.
+- **How:** `electron/services/runner/herdr.ts`. `HerdrTerminals` is PtyManager's `HeldTerminals`, as `BackgroundRunner` is, talking to hc over `hc connect` (framed JSON-RPC, herdr-core's `schema/README.md`).
+  - Each terminal carries labels for its channel, its run and its size. Its HeldMeta is an hc document, `trace-<run id>`.
+  - `HerdrPty` is the IPty Trace uses. Pause and resume work through hc's flow-control credit.
+  - A stream that closes while its program runs (a lost line, an hc restart) is attached again. Only an exit hc reports is an exit.
+- **Environment:** hc lays a terminal's environment over its own. A variable Trace leaves out (an agent session's, `withoutAgentSession`) is therefore removed: on Mac and Linux the program starts through `env -u` for each such name (names only). On Windows they are given empty, and Trace says once to run `hc server restart --fresh` from a clean terminal. Whether Claude Code reads an empty `CLAUDECODE` as unset on Windows has not been checked.
+- **Checked:**
+  - `herdr.test.ts` runs against a real hc with `CODING_HUB_TEST_HC=<hc>`: start, type, resize, take up again after Trace closes, exit codes, a fast exit, a lost line, a restart of hc, close during recovery, and sizes. It passes on a Mac and on GitHub's Windows runner.
+  - `scripts/runner-desktop-smoke.cjs` (after `npm run build:host`) passes with `CODING_HUB_HERDR` set: a crash, then reopening, takes the channel up.
+  - Codex reviewed it twice. Every finding was fixed, and the last pass found nothing.
+- **Not tried:** herdr's phone app (it needs Remote Login, SSH, on the Mac), a reboot, daily use, and which app macOS names for an agent's file access.
