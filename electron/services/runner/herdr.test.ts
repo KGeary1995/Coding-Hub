@@ -40,6 +40,6 @@ describe.skipIf(!hc)('channels held by herdr-core (trial)', () => {
         expect((await exited).exitCode).toBe(3);
         expect(await new HerdrTerminals(hc!).kept()).not.toContain(sessionId);
       } finally { again.close(); }
-    } finally { first.close(); fs.rmSync(cwd, { recursive: true, force: true }); }
+    } finally { first.close(); fs.rmSync(cwd, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 }); }
   });
 });
