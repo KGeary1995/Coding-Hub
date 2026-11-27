@@ -1,5 +1,17 @@
 ## What's new
 
+1.50.0 keeps a channel's context and usage counting through a restart of Trace, and fixes automatic checks and scheduled jobs.
+
+- **Context, tokens and cost keep counting after Trace restarts.** A Claude Code channel the background runner kept running while Trace was closed stopped updating its usage when Trace closed, so its header could show 49% while Claude Code said 92%; its token limit also went unenforced. Trace now remembers how far it read each conversation and picks up there, so what the agent did while Trace was closed counts too, once. A channel already running before this update counts from when Trace takes it up again; its header is right after its next reply. Codex channels kept through a restart are not followed yet.
+- **Automatic checks:**
+  - A pass now covers only the files as they were when the checks ran. A file changed during a run could be counted as checked, also for a task's pull request; such files are checked once more.
+  - Two runs for one project no longer overlap.
+- **Scheduled jobs:**
+  - A job you delete while another job is starting no longer runs.
+  - **Send first request** on a scheduled run's channel now sends the task as the Tasks board does, so Trace tracks it to completion. Before, it typed only the task's text, and the task stayed in To do.
+  - It waits while the agent is asking you something, and says why it did not send.
+  - It goes away once the task is sent from the board, finished, removed or given to another channel.
+
 1.49.0 fixes **All projects** and how channels behave across projects, and fixes what a review of 1.45 to 1.48 found.
 
 - **All projects says so.** While it is on, the project button at the top left says **All projects** (it named the open project); its tooltip names the project new channels open in. Jumping to a channel (its status bar chip, Alt+1–8, Needs you, a notice) no longer switches your project while its tile is already shown. Opening a project any way, the open one too, turns All projects off.
