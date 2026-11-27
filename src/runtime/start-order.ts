@@ -27,9 +27,9 @@ export const LOST_REQUEST_MS = 15_000;
  * nothing waiting for the person (a trust prompt is answered first). Still not ready in time, or not taken: the request
  * is offered on its tile instead, sent with one press. `send` types it another way (a scheduled job sends its task). Whether it was sent.
  */
-export async function sendWhenReady(id: string, prompt: string, send: (session: Session) => Promise<boolean> = (session) => sendToChannel(session, prompt)): Promise<boolean> {
+export async function sendWhenReady(id: string, prompt: string, send: (session: Session) => Promise<boolean> = (session) => sendToChannel(session, prompt), taskId?: string): Promise<boolean> {
   const runId = sessionOf(id)?.runId; let last = Date.now(); let asked = false;
-  const offer = () => { if (sessionOf(id)?.runId === runId) useWorkspaceStore.setState((state) => ({ sessions: state.sessions.map((item) => item.id === id ? { ...item, preparedRequest: { prompt, label: 'Send first request' } } : item) })); };
+  const offer = () => { if (sessionOf(id)?.runId === runId) useWorkspaceStore.setState((state) => ({ sessions: state.sessions.map((item) => item.id === id ? { ...item, preparedRequest: { prompt, label: 'Send first request', ...(taskId ? { taskId } : {}) } } : item) })); };
   const unwatch = watchOutput(id, () => { last = Date.now(); });
   try {
     for (const end = Date.now() + READY_LIMIT_MS; Date.now() < end;) {

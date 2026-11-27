@@ -73,17 +73,18 @@ export class AutoChecks {
   turnEnded(sessionId: string, folder: string) {
     if (!this.deps.enabled() || !detectChecks(folder).length) return;
     const state = this.state(folder); if (state.timer) clearTimeout(state.timer);
-    state.timer = setTimeout(() => { state.timer = null; void this.check(sessionId, folder); }, SETTLE_MS);
+    state.timer = setTimeout(() => { state.timer = null; void this.check(sessionId, folder).catch(() => {}); }, SETTLE_MS);
   }
   private async check(sessionId: string, folder: string) {
     const state = this.state(folder);
     if (state.running) { state.again = sessionId; return; }
-    const now = await repositoryState(folder).catch(() => null);
-    // A Git folder whose files are as they were at the last check: nothing to check (the agent only answered).
-    if (now !== null && now === state.baseline) return;
-    state.running = true; const checks = detectChecks(folder);
+    // Busy before the first await, so a second run here (another turn, a task's pull request) waits instead of overlapping.
+    state.running = true;
     try {
-      const failed = await this.runAll(state, checks, folder, sessionId);
+      const now = await repositoryState(folder).catch(() => null);
+      // A Git folder whose files are as they were at the last check: nothing to check (the agent only answered).
+      if (now !== null && now === state.baseline) return;
+      const failed = await this.runAll(state, detectChecks(folder), folder, sessionId, now);
       if (failed) {
         const handOver = state.fixes >= MAX_FIXES || !this.deps.canMessage(sessionId);
         this.deps.publish({ folder, sessionId, state: 'failed', command: failed.check.label, summary: handOver ? `${failed.check.label} failed${state.fixes >= MAX_FIXES ? ` after ${MAX_FIXES} fixes by the agent` : ''}: over to you.` : `${failed.check.label} failed: sent to the agent to fix.`, output: failureText(failed.output), at: new Date().toISOString() });
@@ -97,16 +98,27 @@ export class AutoChecks {
       if (state.again) { const next = state.again; state.again = null; this.turnEnded(next, folder); }
     }
   }
-  /** Runs the checks in order, each shown on the channel as it starts, and records the result (last); the first that failed, or null. */
-  private async runAll(state: FolderState, checks: AutoCheck[], folder: string, sessionId: string) {
-    let failed: { check: AutoCheck; output: string } | null = null;
-    for (const check of checks) {
-      this.deps.publish({ folder, sessionId, state: 'running', command: check.label, summary: `Checking: ${check.label}`, at: new Date().toISOString() });
-      const result = await (this.deps.run ?? runCheck)(check, folder);
-      if (!result.passed) { failed = { check, output: result.output }; break; }
+  /**
+   * Runs the checks in order, each shown on the channel as it starts, and records the result (last); the first that failed, or null.
+   * `tested` is what the files were before the checks started: the result holds for those files only. Files that changed
+   * while they ran (an agent's edit, or what the checks write themselves) are checked once more as they are then; checks
+   * that write the same each time settle on that second pass.
+   */
+  private async runAll(state: FolderState, checks: AutoCheck[], folder: string, sessionId: string, tested: string | null) {
+    let failed: { check: AutoCheck; output: string } | null = null; let after = tested;
+    for (let pass = 0; pass < 2; pass++) {
+      failed = null;
+      for (const check of checks) {
+        this.deps.publish({ folder, sessionId, state: 'running', command: check.label, summary: `Checking: ${check.label}`, at: new Date().toISOString() });
+        const result = await (this.deps.run ?? runCheck)(check, folder);
+        if (!result.passed) { failed = { check, output: result.output }; break; }
+      }
+      after = tested === null ? null : await repositoryState(folder).catch(() => null);
+      if (after === null || after === tested || pass === 1) break;
+      tested = after;
     }
-    state.baseline = await repositoryState(folder).catch(() => null);
-    state.last = { passed: !failed, summary: failed ? `${failed.check.label} failed.` : `Checks passed: ${checks.map((check) => check.label).join(', ')}`, tested: state.baseline };
+    state.baseline = tested;
+    state.last = { passed: !failed, summary: failed ? `${failed.check.label} failed.` : `Checks passed: ${checks.map((check) => check.label).join(', ')}`, tested };
     return failed;
   }
   /**
@@ -119,11 +131,11 @@ export class AutoChecks {
     const state = this.state(folder);
     for (const started = Date.now(); (state.timer || state.running) && Date.now() - started < SETTLED_WAIT_MS;) await new Promise((resolve) => setTimeout(resolve, 1000));
     if (state.timer || state.running) return { passed: false, summary: `The checks were still running after ${SETTLED_WAIT_MS / 60_000} minutes.` };
-    const now = await repositoryState(folder).catch(() => null);
-    if (state.last && now !== null && state.last.tested === now) return state.last;
     state.running = true;
     try {
-      const failed = await this.runAll(state, checks, folder, sessionId);
+      const now = await repositoryState(folder).catch(() => null);
+      if (state.last && now !== null && state.last.tested === now) return state.last;
+      const failed = await this.runAll(state, checks, folder, sessionId, now);
       this.deps.publish({ folder, sessionId, state: failed ? 'failed' : 'passed', command: failed?.check.label ?? null, summary: failed ? `${failed.check.label} failed: over to you.` : state.last!.summary, ...(failed ? { output: failureText(failed.output) } : {}), at: new Date().toISOString() });
       return state.last!;
     } finally {

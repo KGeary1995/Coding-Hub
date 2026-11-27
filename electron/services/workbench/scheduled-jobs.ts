@@ -132,8 +132,10 @@ export class ScheduledJobs {
   async tick() {
     if (this.ticking || !this.host.ready()) return; this.ticking = true;
     try {
-      let jobs: ScheduledJob[]; try { jobs = this.jobs(); } catch { return; }
-      for (const item of jobs) {
+      let ids: string[]; try { ids = this.jobs().map((item) => item.id); } catch { return; }
+      for (const id of ids) {
+        // Read again for each: an earlier run is awaited, and meanwhile this job may have been deleted, paused or changed.
+        let item: ScheduledJob | undefined; try { item = this.jobs().find((job) => job.id === id); } catch { return; } if (!item) continue;
         const now = this.now(); const due = dueRun(item, now); if (!due) continue;
         if (due.missed) { this.update(item.id, (current) => ({ ...current, checkedAt: now.toISOString(), lastRun: { at: due.at.toISOString(), result: 'missed', note: MISSED_NOTE } })); this.host.changed(); continue; }
         if (this.host.held()) continue;
@@ -163,6 +165,9 @@ export class ScheduledJobs {
       const sessionId = randomUUID(); let task: Task;
       try { task = await this.host.addTask({ ...base, sessionId, notes: `Scheduled run of “${item.name}”, ${localTime(at)}.${item.engine === 'gemini' || item.engine === 'custom' ? ' Trace reads the agent’s screen for TASK COMPLETE; if it does not say so, read its channel, then move this task on.' : ''}` }); }
       catch (error) { return record({ at: when, result: 'failed', note: `Did not start: ${error instanceof HubError ? error.message : 'its task could not be saved.'}` }); }
+      // Deleted while its task was being saved: its channel does not open.
+      let kept = true; try { kept = this.jobs().some((job) => job.id === item.id); } catch { /* Unreadable now: the run goes ahead, as it was due. */ }
+      if (!kept) { try { this.host.noteTask(task.id, 'It did not start: its scheduled job was deleted.'); } catch { /* Removed too. */ } this.host.changed(); return { at: when, result: 'failed', note: 'Did not start: its scheduled job was deleted.', taskId: task.id }; }
       this.update(item.id, (current) => ({ ...current, active: { taskId: task.id, sessionId } }));
       try { await this.host.open({ taskId: task.id, sessionId, engine: item.engine, ...(item.agent ? { agent: item.agent } : {}), directory: task.directory, title: item.name, ...(replace ? { replace } : {}) }); }
       catch (error) {

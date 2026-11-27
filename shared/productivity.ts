@@ -2,7 +2,8 @@ import type { SavedWorkspace, SessionHistoryRun } from './types';
 import { newTokens, type UsageRecord } from './hub';
 import type { VerificationProfile } from './workbench';
 export interface SessionBudget { tokens: number | null; costUSD: number | null; contextPercent: number }
-export interface PreparedSessionRequest { prompt: string; label: string }
+/** `taskId`: a scheduled run's task that could not be sent by itself; its button sends it as that task (marked sent, tracked), not as the bare text. */
+export interface PreparedSessionRequest { prompt: string; label: string; taskId?: string }
 export interface ConversationLabel { key: string; name: string; pinned: boolean }
 export interface SearchHit { id: string; kind: 'file' | 'output' | 'memory' | 'rules'; title: string; location: string; snippet: string; view: 'files' | 'history' | 'memory' | 'rules'; noteId?: string }
 export interface SearchResults { hits: SearchHit[]; limited: boolean }

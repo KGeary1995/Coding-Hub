@@ -78,7 +78,7 @@ const binding = z.discriminatedUnion('mode', [z.object({ mode: z.literal('worksp
 const sessionFields = {
   id: identifier, title: z.string().min(1).max(160), binding,
   budget: z.object({ tokens: z.number().int().min(1).max(100000000).nullable(), costUSD: z.number().positive().max(100000).nullable(), contextPercent: z.number().int().min(1).max(100) }).strict().optional(),
-  preparedRequest: z.object({ prompt: z.string().min(1).max(4000), label: z.string().min(1).max(100) }).strict().optional(),
+  preparedRequest: z.object({ prompt: z.string().min(1).max(4000), label: z.string().min(1).max(100), taskId: z.uuid().optional() }).strict().optional(),
   startup: z.object({ order: z.number().int().min(1).max(MAX_STEP), command: z.string().min(1).max(MAX_COMMAND).optional(), prompt: z.string().min(1).max(4000).optional(), waitFor: z.string().min(1).max(MAX_WAIT_TEXT).optional(), waitSeconds: z.number().int().min(5).max(MAX_WAIT_SECONDS).optional() }).strict().optional(),
   createdAt: z.string().datetime(),
 };

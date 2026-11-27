@@ -89,6 +89,43 @@ describe('automatic checks after a turn', () => {
     expect(await checks.settled(folder, 's1')).toMatchObject({ passed: false, summary: 'npm test failed.' });
     expect(ran).toEqual(['npm run typecheck', 'npm test']); expect(sent).toEqual([]); expect(statuses.at(-1)).toMatchObject({ state: 'failed', summary: 'npm test failed: over to you.' });
   });
+  it('checks once more files changed while the checks ran, and reuses that result only for them', async () => {
+    const { folder, checks, ran } = setup([]); const deps = (checks as unknown as { deps: { run: (check: AutoCheck) => Promise<unknown> } }).deps;
+    const original = deps.run; deps.run = async (check) => { const result = await original(check); if (ran.length === 1) files.state = 'edited during the checks'; return result; };
+    files.state = 'a'; expect(await checks.settled(folder, 's1')).toMatchObject({ passed: true }); expect(ran).toHaveLength(4);
+    expect(await checks.settled(folder, 's1')).toMatchObject({ passed: true }); expect(ran).toHaveLength(4);
+    files.state = 'edited after'; expect(await checks.settled(folder, 's1')).toMatchObject({ passed: true }); expect(ran).toHaveLength(6);
+  });
+  it('after a turn, a second pass covers what the checks write themselves, and a turn that only answered runs none', async () => {
+    vi.useFakeTimers(); const { folder, checks, ran, sent } = setup([false, false, false, false, false, false]);
+    const deps = (checks as unknown as { deps: { run: (check: AutoCheck) => Promise<unknown> } }).deps; const original = deps.run;
+    // A failing test run that writes the same file each time (a report Git does not ignore).
+    deps.run = async (check) => { const result = await original(check); files.state = `${files.state?.replace(/ \+ report$/, '')} + report`; return result; };
+    files.state = 'a'; await checks.started(folder); files.state = 'edited'; checks.turnEnded('s1', folder); await settle();
+    expect(ran).toHaveLength(2); expect(sent).toHaveLength(1);
+    checks.turnEnded('s1', folder); await settle(); checks.turnEnded('s1', folder); await settle();
+    expect(ran).toHaveLength(2); expect(sent).toHaveLength(1);
+    // An edit made while the checks ran is checked, even when its turn ends after them.
+    deps.run = async (check) => { const result = await original(check); if (ran.length === 3) files.state = 'edited again + report'; return result; };
+    files.state = 'edited twice'; checks.turnEnded('s1', folder); await settle(); expect(ran).toHaveLength(4);
+    checks.turnEnded('s1', folder); await settle(); expect(ran).toHaveLength(4);
+  });
+  it('a turn’s run and a pull request’s never overlap', async () => {
+    vi.useFakeTimers(); const { folder, checks, ran } = setup([true, true, true, true]); let at = 0; let most = 0;
+    const deps = (checks as unknown as { deps: { run: (check: AutoCheck) => Promise<unknown> } }).deps; const original = deps.run;
+    deps.run = async (check) => { most = Math.max(most, ++at); await new Promise((resolve) => setTimeout(resolve, 100)); try { return await original(check); } finally { at--; } };
+    // The turn's run starting (its settle time over) in the same moment as the pull request asks.
+    files.state = 'a'; const turn = (checks as unknown as { check(sessionId: string, folder: string): Promise<void> }).check('s1', folder); const result = checks.settled(folder, 's2');
+    await vi.advanceTimersByTimeAsync(5000); await turn;
+    expect(await result).toMatchObject({ passed: true }); expect(most).toBe(1); expect(ran).toHaveLength(2);
+  });
+  it('runs one set of checks at a time per folder, however many ask at once', async () => {
+    vi.useFakeTimers(); const { folder, checks, ran } = setup([true, true, true, true]); let at = 0; let most = 0;
+    const deps = (checks as unknown as { deps: { run: (check: AutoCheck) => Promise<unknown> } }).deps; const original = deps.run;
+    deps.run = async (check) => { most = Math.max(most, ++at); await new Promise((resolve) => setTimeout(resolve, 100)); try { return await original(check); } finally { at--; } };
+    files.state = 'a'; const both = Promise.all([checks.settled(folder, 's1'), checks.settled(folder, 's2')]); await vi.advanceTimersByTimeAsync(5000);
+    expect(await both).toMatchObject([{ passed: true }, { passed: true }]); expect(most).toBe(1); expect(ran).toHaveLength(2);
+  });
   it('says there are none for a project without checks, or when they are off', async () => {
     const none = new AutoChecks({ enabled: () => true, canMessage: () => true, send: async () => {}, publish: () => {} });
     expect(await none.settled(project({ 'README.md': '# hi' }), 's1')).toBeNull();

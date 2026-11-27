@@ -7,6 +7,7 @@ import { closeChannel, startSession } from './use-native-host';
 import { sendWhenReady } from './start-order';
 import { sendToChannel } from './send-to-channel';
 import { workbench } from './workbench';
+import { dropPreparedTask, peekCoachingPrompt, showPreparedReason, takeCoachingPrompt } from './coaching';
 import { useAgentStore } from '../state/agent-store';
 
 const sessionOf = (id: string) => useWorkspaceStore.getState().sessions.find((item) => item.id === id);
@@ -43,6 +44,34 @@ export async function scheduledRun(request: ScheduledRunRequest): Promise<string
   return undefined;
 }
 
+/** Sends a run's task to its channel, as Send on the Tasks board does; `prompt` when task-send already gave it. False when it was not sent (back in To do). */
+async function sendTaskTo(taskId: string, session: Session, prompt?: string) {
+  if (isChatEngineConfig(session.config)) return sendTask(taskId).then(() => true, () => false);
+  // Already marked sent when it was to go in at the start (a long one, or one the host did not take as arguments).
+  const typed = prompt ?? (await workbench<TaskSent>({ action: 'task-send', id: taskId })).prompt;
+  if (await sendToChannel(session, typed)) { await loadTasks(); return true; }
+  await setTaskStatus(taskId, 'queued'); return false;
+}
+/**
+ * Send first request on a run's channel, after it could not be sent by itself (deliver): the task, marked sent and tracked.
+ * Null once sent, else why not, which the tile shows. An offer that no longer applies (the task removed, finished, or given
+ * to another channel) goes.
+ */
+export async function sendPreparedTask(taskId: string, sessionId: string): Promise<string | null> {
+  const why = await preparedSend(taskId, sessionId); return showPreparedReason(sessionId, why, why !== null && !peekCoachingPrompt(sessionId));
+}
+async function preparedSend(taskId: string, sessionId: string): Promise<string | null> {
+  // Unread, the board is not taken as empty: the offer stays for another try.
+  await loadTasks(); if (useTaskStore.getState().error) return 'Trace could not read the Tasks board. Try again.';
+  const session = sessionOf(sessionId); const task = useTaskStore.getState().tasks.find((item) => item.id === taskId);
+  if (!task || task.status === 'review' || task.status === 'done' || task.sessionId !== sessionId) { takeCoachingPrompt(sessionId); return !task ? 'That task is no longer on the Tasks board.' : task.sessionId !== sessionId ? 'That task was given to another channel.' : 'That task was already done.'; }
+  if (!session || session.status !== 'running') return 'Start this channel first, then send the task.';
+  if (isChatEngineConfig(session.config)) return sendTask(taskId).then(() => null, (error: unknown) => error instanceof Error ? error.message : 'The task could not be sent.');
+  // A terminal waiting on a question would take the prompt's Enter as its answer (sendTask refuses the same).
+  if (session.attention) return 'That channel is waiting for you. Answer what it asks first, then send the task.';
+  return sendTaskTo(taskId, session).then((sent) => sent ? null : 'The task could not be typed into that channel. It is back in To do.', (error: unknown) => error instanceof Error ? error.message : 'The task could not be sent.');
+}
+
 /** Adds a line to a task's notes from the window. */
 async function noteTask(id: string, note: string) {
   const task = useTaskStore.getState().tasks.find((item) => item.id === id); if (!task) return;
@@ -55,15 +84,22 @@ async function noteTask(id: string, note: string) {
  * (screenSignal), as for one sent from the board. Not sent: the task stays in To do and says why.
  */
 export async function deliver(taskId: string, sessionId: string, prompt?: string) {
+  await loadTasks(); if (useTaskStore.getState().error) await loadTasks(); const unread = Boolean(useTaskStore.getState().error);
+  const task = (): Task | undefined => useTaskStore.getState().tasks.find((item) => item.id === taskId); const sendId = task()?.sendId;
+  // Still as the start left it: marked sent then (its prompt went in with the start, or is to be typed here) and not since.
+  // With the board unread at first, any Working task counts as that, as before.
+  const untyped = () => { const now = task(); return Boolean(prompt) && now?.status === 'active' && (unread ? sendId === undefined || now.sendId === sendId : sendId !== undefined && now.sendId === sendId); };
+  // Read again each time, as the person may have acted meanwhile: sent here while still in To do or untyped; otherwise it
+  // was sent from the board (Working with another mark), finished, removed, or given to another channel.
+  const mine = () => { const now = task(); return Boolean(now) && now!.sessionId === sessionId && (now!.status === 'queued' || untyped()); };
+  // To do again: sent as the task anew (task-send marks it), not with the start's prompt.
+  const send = async (session: Session) => { await loadTasks(); return mine() && sendTaskTo(taskId, session, untyped() ? prompt : undefined).catch(() => false); };
+  // Offered with the task's id (Send first request): pressed, it goes as this task, marked sent, not as its bare details.
+  if (await sendWhenReady(sessionId, task()?.details || task()?.title || 'Send the task', send, taskId)) return;
   await loadTasks();
-  const task = (): Task | undefined => useTaskStore.getState().tasks.find((item) => item.id === taskId);
-  const send = async (session: Session) => {
-    if (isChatEngineConfig(session.config)) return sendTask(taskId).then(() => true, () => false);
-    // Already marked sent when it was to go in at the start (a long one, or one the host did not take as arguments).
-    const typed = prompt ?? (await workbench<TaskSent>({ action: 'task-send', id: taskId })).prompt;
-    if (await sendToChannel(session, typed)) { await loadTasks(); return true; }
-    await setTaskStatus(taskId, 'queued'); return false;
-  };
-  if (await sendWhenReady(sessionId, task()?.details ?? '', (session) => send(session).catch(() => false))) return;
-  await noteTask(taskId, sessionOf(sessionId)?.status === 'running' ? 'The request could not be sent by itself (the agent was not ready within 2 minutes, or did not take it), so it waits on its channel: press Send first request there.' : 'The channel stopped before the request was sent.');
+  // Marked sent at the start but never typed: back in To do, so nothing reads it as being worked on.
+  if (untyped()) { await setTaskStatus(taskId, 'queued').catch(() => {}); await loadTasks(); }
+  if (!mine()) { dropPreparedTask(sessionId, taskId); return; }
+  // Offered only on the run it was started for: a channel restarted meanwhile has no button, so the board is named.
+  await noteTask(taskId, sessionOf(sessionId)?.status !== 'running' ? 'The channel stopped before the request was sent.' : peekCoachingPrompt(sessionId)?.taskId === taskId ? 'The request could not be sent by itself (the agent was not ready within 2 minutes, or did not take it), so it waits on its channel: press Send first request there.' : 'The request could not be sent by itself (its channel was restarted meanwhile): send it from the Tasks board.');
 }
