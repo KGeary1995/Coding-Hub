@@ -43,6 +43,7 @@ import { closeAsks, ConfirmStep } from './ConfirmStep';
 import { openPreview, usePreviewStore } from '../state/preview-store';
 import { previewLabel } from '../../shared/app-preview';
 import { useChannel } from '../state/last-channel';
+import { sendPreparedTask } from '../runtime/scheduled-run';
 
 /** What "tok" counts, and the cache traffic it leaves out. */
 const tokenDetail = (usage: UsageRecord) => `New tokens this run: ${freshInput(usage).toLocaleString()} input${usage.engine === 'claude' && usage.cacheWrite ? ` (including ${usage.cacheWrite.toLocaleString()} written to the cache)` : ''} + ${usage.output.toLocaleString()} output. Not counted: ${usage.cached.toLocaleString()} cache reads.`;
@@ -215,7 +216,7 @@ export const SessionTile = memo(function SessionTile({ session, index }: { sessi
         <WorktreeControls session={session} />
         {busy && <p className="control-note">Stop the channel to change its next launch settings.</p>}
       </fieldset>}
-      {session.status === 'running' && peekCoachingPrompt(session.id) && <div className="session-error notice"><span>{peekCoachingPrompt(session.id)?.label === 'Send first request' ? 'Its first request from Start in order. Finish any CLI trust or setup prompts first.' : 'Finish any CLI trust or setup prompts first. This request asks the agent to read your prepared report.'}</span><button className="button secondary small" onClick={() => { const prompt = peekCoachingPrompt(session.id)?.prompt; if (prompt) { setCoachingSent(true); void sendPrompt(prompt).then((sent) => { if (sent) takeCoachingPrompt(session.id); else setCoachingSent(false); }); } }} disabled={coachingSent}>{peekCoachingPrompt(session.id)?.label ?? 'Send prepared request'}</button></div>}
+      {session.status === 'running' && peekCoachingPrompt(session.id) && <div className="session-error notice"><span>{peekCoachingPrompt(session.id)?.taskId ? 'Its task from a scheduled job. Finish any CLI trust or setup prompts first.' : peekCoachingPrompt(session.id)?.label === 'Send first request' ? 'Its first request from Start in order. Finish any CLI trust or setup prompts first.' : 'Finish any CLI trust or setup prompts first. This request asks the agent to read your prepared report.'}</span><button className="button secondary small" onClick={() => { const prepared = peekCoachingPrompt(session.id); if (prepared) { setCoachingSent(true); void (prepared.taskId ? sendPreparedTask(prepared.taskId, session.id).then((why) => !why) : sendPrompt(prepared.prompt)).then((sent) => { if (sent) takeCoachingPrompt(session.id); setCoachingSent(false); }); } }} disabled={coachingSent}>{peekCoachingPrompt(session.id)?.label ?? 'Send prepared request'}</button></div>}
       {/* One row for the check result and Undo last turn, wrapping only when the tile is too narrow for both: each was a row of its own, which a laptop's tiles could not spare. */}
       <div className="tile-bars"><AutoCheckLine sessionId={session.id} />{!shell && <UndoTurnLine sessionId={session.id} channel={channel} folder={cwd} />}</div>
       {chat && attention}

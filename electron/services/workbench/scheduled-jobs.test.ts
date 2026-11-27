@@ -136,6 +136,23 @@ describe('scheduled runs', () => {
     trace.tasks[0].status = 'review'; vi.setSystemTime(local(7, 6, 10)); await jobs.tick();
     expect(trace.opened).toHaveLength(2); expect(trace.opened[1].replace).toBe(trace.opened[0].sessionId); expect(trace.full.at(-1)).toBe(trace.opened[0].sessionId);
   });
+  it('does not start a job deleted while an earlier due job was opening', async () => {
+    vi.useFakeTimers(); vi.setSystemTime(local(7, 6, 7)); const root = fixture(); let release = () => {};
+    const trace = host(); trace.open = (request) => new Promise<void>((resolve) => { trace.opened.push(request); trace.running.add(request.sessionId); release = resolve; });
+    const jobs = new ScheduledJobs(root, trace); await save(jobs, root, { name: 'First' }); const { jobs: [, second] } = await save(jobs, root, { name: 'Second' });
+    vi.setSystemTime(local(7, 6, 8)); const ticked = jobs.tick();
+    for (let step = 0; step < 50 && !trace.opened.length; step++) await Promise.resolve();
+    expect(trace.opened.map((item) => item.title)).toEqual(['First']);
+    await jobs.execute({ action: 'job-delete', id: second.id }); release(); await ticked;
+    expect(trace.opened.map((item) => item.title)).toEqual(['First']); expect(trace.tasks).toHaveLength(1);
+  });
+  it('does not open the channel of a job deleted while its task was being saved', async () => {
+    vi.useFakeTimers(); vi.setSystemTime(local(7, 6, 7)); const root = fixture(); const trace = host(); const add = trace.addTask; let jobs: ScheduledJobs;
+    trace.addTask = async (fields) => { const task = await add(fields); await jobs.execute({ action: 'job-delete', id: jobs.data().jobs[0].id }); return task; };
+    let changed = 0; trace.changed = () => { changed++; };
+    jobs = new ScheduledJobs(root, trace); await save(jobs, root); vi.setSystemTime(local(7, 6, 8)); await jobs.tick(); expect(changed).toBe(1);
+    expect(trace.opened).toHaveLength(0); expect(trace.tasks[0].notes).toContain('its scheduled job was deleted'); expect(jobs.data().jobs).toEqual([]);
+  });
   it('with every channel taken, skips the run and notes it on a task', async () => {
     vi.useFakeTimers(); vi.setSystemTime(local(7, 6, 7)); const root = fixture(); const trace = host(); trace.isFull = true; const jobs = new ScheduledJobs(root, trace);
     await save(jobs, root, { engine: 'codex' }); vi.setSystemTime(local(7, 6, 8, 1)); await jobs.tick();

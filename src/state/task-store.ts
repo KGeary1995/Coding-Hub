@@ -10,6 +10,7 @@ import { activitySamples } from './activity-store';
 import { sendMark } from './task-evidence';
 import { useChatStore } from './chat-store';
 import { sendToChannel } from '../runtime/send-to-channel';
+import { dropPreparedTask } from '../runtime/coaching';
 import { hierarchyDetached } from './hierarchy-state';
 import { isAgentConfig, isChatEngineConfig, isChatRun, readsFromScreen } from '../../shared/types';
 
@@ -61,6 +62,8 @@ export async function sendTask(id: string) {
   // A chat leading a Round Table passes the task to both agents, as a message typed there would (sendToChannel).
   const sent = await sendToChannel(session, prompt);
   if (!sent) { await setTaskStatus(id, 'queued'); throw new Error('The task could not be typed into that channel. It is back in To do.'); }
+  // A scheduled run's Send first request for this task (scheduled-run.ts) is done with: pressed later, it would send it twice.
+  dropPreparedTask(session.id, id);
   await loadTasks(); void refreshTaskWatch();
 }
 
