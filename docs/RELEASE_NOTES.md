@@ -1,5 +1,19 @@
 ## What's new
 
+1.49.0 fixes **All projects** and how channels behave across projects, and fixes what a review of 1.45 to 1.48 found.
+
+- **All projects says so.** While it is on, the project button at the top left says **All projects** (it named the open project); its tooltip names the project new channels open in. Jumping to a channel (its status bar chip, Alt+1–8, Needs you, a notice) no longer switches your project while its tile is already shown. Opening a project any way, the open one too, turns All projects off.
+- **Tiles fit when you switch.** Turning All projects on or off, or opening another project, lays the tiles out to fit the channels shown. A layout you drag or resize while a project's channels show is kept.
+- **Across projects:**
+  - Notices no longer go missing or show twice for channels while another project's channels are hidden, and a jump scrolls to its tile.
+  - Changes and Files open on the project you switched to, not a channel of the last one.
+  - A channel maximised in another project is not kept maximised (after a switch, turning All projects off, or a restart).
+  - A channel moved into a new isolated worktree stays in its repository's project.
+- **Automatic handoff:** after a compaction, the next climb no longer says "Handoff saved" before it is asked. A compaction refused because the agent was busy is tried again at the next turn's end, and not once it is back under the limit. A Round Table seat whose table is not open shows **Write handoff**, since Trace cannot ask it.
+- **Projects between computers:** each project's GitHub remote is read in the background (a slow folder froze Trace for up to 3 seconds each), one added later is shared without a restart, a project open on this computer is never offered to clone, and nothing is offered while sync is off.
+- **Smaller fixes:** the project menu lists the last ten projects, as 1.46 said (it showed six). Settings → Terminal has **Smaller on a laptop's screen**, on by default, to keep font size 13 on a laptop (this computer only). The Accessibility card shows Cmd for the command menu on a Mac.
+- **For developers:** Round Table handoff tests no longer depend on the order they run in.
+
 1.48.0 tidies Trace's design after a full review, and keeps coaching tips on the AI coaching page instead of under each channel.
 
 - **Live coaching tips are listed on AI coaching only.** They no longer show under each channel, on a linked computer's tab or on the phone; the checks still run on this computer, as before.

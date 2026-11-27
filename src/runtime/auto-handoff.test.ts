@@ -1,4 +1,5 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { randomUUID } from 'node:crypto';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Session } from '../../shared/types';
 import type { MemoryNote, UsageRecord } from '../../shared/hub';
 import type { RoundTableState } from '../../shared/chat';
@@ -89,12 +90,17 @@ describe('a chat channel’s automatic handoff', () => {
 });
 
 describe('a Round Table seat’s automatic handoff (1.47)', () => {
-  const RUNS = { s1: '11111111-1111-4111-8111-111111111111', s2: '22222222-2222-4222-8222-222222222222', s3: '33333333-3333-4333-8333-333333333333' } as const;
-  const idle: RoundTableState = { partner: { sessionId: 's2', runId: RUNS.s2, engine: 'codex' }, driver: 'claude', rounds: 2, round: 0, phase: 'idle', agreed: false };
+  // New runs for each test: Trace remembers runs asked, waiting and compacting between turns, so a test reusing another's
+  // runs would find them already asked (and pass or fail by the order the tests ran in).
   const table = { partner: 's2', driver: 'claude' as const, rounds: 2, seats: [{ session: 's1' }, { session: 's2' }, { session: 's3' }] };
-  const lead = session({ runId: RUNS.s1, config: { engine: 'claude', chat: true, model: '', thinking: { budget_tokens: null }, tokenLimits: { maxOutputTokens: null, maxSessionTokens: null } }, roundTable: table });
-  const codex = session({ id: 's2', runId: RUNS.s2, config: { engine: 'codex', chat: true, model: '', reasoningEffort: null } });
-  const gemini = session({ id: 's3', runId: RUNS.s3, config: { engine: 'gemini', chat: true, model: '' } });
+  let RUNS: Record<'s1' | 's2' | 's3', string>; let idle: RoundTableState; let lead: Session; let codex: Session; let gemini: Session;
+  beforeEach(() => {
+    RUNS = { s1: randomUUID(), s2: randomUUID(), s3: randomUUID() };
+    idle = { partner: { sessionId: 's2', runId: RUNS.s2, engine: 'codex' }, driver: 'claude', rounds: 2, round: 0, phase: 'idle', agreed: false };
+    lead = session({ runId: RUNS.s1, config: { engine: 'claude', chat: true, model: '', thinking: { budget_tokens: null }, tokenLimits: { maxOutputTokens: null, maxSessionTokens: null } }, roundTable: table });
+    codex = session({ id: 's2', runId: RUNS.s2, config: { engine: 'codex', chat: true, model: '', reasoningEffort: null } });
+    gemini = session({ id: 's3', runId: RUNS.s3, config: { engine: 'gemini', chat: true, model: '' } });
+  });
   const record = (id: keyof typeof RUNS, used: number, limit = 1_000_000): UsageRecord => ({ ...usage(used, limit), runId: RUNS[id], sessionId: id });
   afterEach(() => { vi.unstubAllGlobals(); useChatStore.setState({ threads: {} }); useHandoffStore.setState({ bySession: {} }); });
 
