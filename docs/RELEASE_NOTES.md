@@ -1,5 +1,14 @@
 ## What's new
 
+1.51.0 makes updates lighter: Trace downloads an update by itself and can install it when you quit.
+
+- **Updates download by themselves.** With automatic checks on (Settings → Application updates), an update Trace finds is downloaded straight away.
+- **Install when Trace quits.** A new setting, **Install a downloaded update when Trace quits**, is on by default. Quitting Trace installs a downloaded update, with no dialog and nothing to run.
+  - **Windows:** it installs silently, also while channels keep running in the background.
+  - **Mac:** it installs only when no channel is kept running in the background, because those channels run from the app being replaced. Otherwise **Restart and install** still does it.
+  - It doesn't install if programs were left running after quitting, or, on Windows, while **Share this screen** is on (the installer would stop the screen service).
+  - This copy still updates to 1.51.0 the old way. Install on quit starts with the update after it.
+
 1.50.0 keeps a channel's context and usage counting through a restart of Trace, and fixes automatic checks and scheduled jobs.
 
 - **Context, tokens and cost keep counting after Trace restarts.** A Claude Code channel the background runner kept running while Trace was closed stopped updating its usage when Trace closed, so its header could show 49% while Claude Code said 92%; its token limit also went unenforced. Trace now remembers how far it read each conversation and picks up there, so what the agent did while Trace was closed counts too, once. A channel already running before this update counts from when Trace takes it up again; its header is right after its next reply. Codex channels kept through a restart are not followed yet.
