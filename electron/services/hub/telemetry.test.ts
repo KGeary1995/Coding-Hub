@@ -100,7 +100,31 @@ describe('a Claude run the background runner kept while Trace was closed', () =>
       expect(again.runUsage(run.runId)).toMatchObject({ input: 107, context: { used: 8 } }); expect(lines).toHaveLength(1);
       // And after another /clear once taken up, the new transcript's lines are coached from its start.
       const next = randomUUID(); again.follow(run.runId, next); fs.writeFileSync(path.join(dir, next + '.jsonl'), reply('c', 3, 1)); vi.advanceTimersByTime(750); expect(lines).toHaveLength(2);
+      // Until its transcript is written, a switch is not given out as the conversation (a channel resumes that).
+      const empty = randomUUID(); again.follow(run.runId, empty); again.setContextWindow(run.runId, 200_000); expect(again.runUsage(run.runId)?.conversationId).toBe(next);
     } finally { again.close(); }
+  });
+  it('after a restart, coaches lines written after a /clear in a conversation that was taken up mid-way', async () => {
+    vi.useFakeTimers(); const { root, home, dir } = setup(); const run = { runId: randomUUID(), sessionId: 's', engine: 'claude' as const, cwd: '/project', pid: 1 };
+    fs.writeFileSync(path.join(dir, run.runId + '.jsonl'), reply('a', 100, 1) + reply('b', 100, 1));
+    const first = service(root, home); try { first.start(run, claude); vi.advanceTimersByTime(750); } finally { first.close(); }
+    const lines: unknown[] = []; const again = service(root, home, lines);
+    try {
+      again.adopt(run, claude); vi.advanceTimersByTime(750); expect(lines).toEqual([]);
+      const next = randomUUID(); again.follow(run.runId, next); fs.writeFileSync(path.join(dir, next + '.jsonl'), reply('c', 3, 1)); vi.advanceTimersByTime(750); expect(lines).toHaveLength(1);
+    } finally { again.close(); }
+  });
+  it('counts what a run did while closed from its transcript\'s start when Trace had not read it yet, and from now for a run recorded before read positions were kept', async () => {
+    vi.useFakeTimers(); const { root, home, dir } = setup(); const run = { runId: randomUUID(), sessionId: 's', engine: 'claude' as const, cwd: '/project', pid: 1 };
+    const first = service(root, home); try { first.start(run, claude); vi.advanceTimersByTime(750); } finally { first.close(); }
+    // Claude Code wrote its transcript only after Trace closed.
+    fs.writeFileSync(path.join(dir, run.runId + '.jsonl'), reply('a', 40, 1));
+    const again = service(root, home); try { again.adopt(run, claude); vi.advanceTimersByTime(750); expect(again.runUsage(run.runId)).toMatchObject({ input: 40 }); } finally { again.close(); }
+    // A run recorded before read positions were kept: what is in its transcript now was read then, or is not known.
+    const old = { ...run, runId: randomUUID() }; fs.writeFileSync(path.join(dir, old.runId + '.jsonl'), reply('x', 500, 1));
+    const recorder = service(root, home); try { (recorder as unknown as { database: { prepare(sql: string): { run(...values: string[]): void } } }).database.prepare('INSERT INTO metadata(run,value) VALUES(?,?)').run(old.runId, JSON.stringify({ runId: old.runId, sessionId: 's', engine: 'claude', model: 'm', cwd: '/project', timestamp: new Date().toISOString() })); } finally { recorder.close(); }
+    const later = service(root, home);
+    try { later.adopt(old, claude); vi.advanceTimersByTime(750); expect(later.runUsage(old.runId)?.input ?? 0).toBe(0); fs.appendFileSync(path.join(dir, old.runId + '.jsonl'), reply('y', 6, 1)); vi.advanceTimersByTime(750); expect(later.runUsage(old.runId)).toMatchObject({ input: 6 }); } finally { later.close(); }
   });
 });
 

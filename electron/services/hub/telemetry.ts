@@ -167,8 +167,9 @@ export class TelemetryService {
     if ((w.file ? path.basename(w.file, '.jsonl') : w.config.resumeId ?? w.run.runId) === conversationId) return;
     this.poll(w);
     w.config = { ...w.config, resumeId: conversationId }; w.file = null; w.offset = 0; w.partial = Buffer.alloc(0); w.subagents = undefined; w.walked = undefined; w.searching = undefined; w.nextFind = undefined; w.following = conversationId; w.quietUntil = undefined;
-    // Kept at once, so a run the runner keeps through a restart is taken up in this conversation, from here (adopt).
-    try { const record = this.database.prepare('SELECT value FROM metadata WHERE run=?').get(runId); if (record) this.database.prepare('UPDATE metadata SET value=? WHERE run=?').run(JSON.stringify({ ...JSON.parse(String(record.value)), conversationId }), runId); } catch { /* Recorded when its transcript is found. */ }
+    // Kept at once (apart from conversationId, which names a transcript that exists), so a run the runner keeps through a
+    // restart is taken up in this conversation, from here (adopt).
+    try { const record = this.database.prepare('SELECT value FROM metadata WHERE run=?').get(runId); if (record) this.database.prepare('UPDATE metadata SET value=? WHERE run=?').run(JSON.stringify({ ...JSON.parse(String(record.value)), following: conversationId }), runId); } catch { /* Followed by this run only. */ }
     try {
       const file = this.find(w);
       if (file) { const subagents = subagentSizes(file); w.file = file; w.offset = fs.statSync(file).size; for (const log of subagentLogs(path.join(path.dirname(file), conversationId, 'subagents'))) this.reached.run(runId, log.file, subagents.get(log.name) ?? 0); this.reached.run(runId, file, w.offset); if (subagents.size) w.subagents = new Map([...subagents].map(([name, offset]) => [name, { offset, partial: Buffer.alloc(0) }])); }
@@ -295,14 +296,19 @@ export class TelemetryService {
   adopt(run: BuiltInRunningSession, config: CLIEngineConfig, claudeHome = this.claudeHome) {
     if (run.engine !== 'claude' || this.watches.has(run.runId) || this.closed) return;
     let kept: Record<string, unknown> | null = null; try { const record = this.database.prepare('SELECT value FROM metadata WHERE run=?').get(run.runId); if (record) kept = JSON.parse(String(record.value)) as Record<string, unknown>; } catch { kept = null; }
-    const conversation = typeof kept?.conversationId === 'string' && UUID.test(kept.conversationId) ? kept.conversationId : undefined;
+    // A switch it made (/clear, /resume) whose transcript was not written yet is followed too (follow keeps it as `following`).
+    const id = (value: unknown) => typeof value === 'string' && UUID.test(value) ? value : undefined;
+    const pending = id(kept?.following); const conversation = pending ?? id(kept?.conversationId);
     const followed = conversation ? { ...config, resumeId: conversation } : config;
     const saved = new Map(this.database.prepare('SELECT file, offset FROM progress WHERE run=?').all(run.runId).map((row) => [String(row.file), Number(row.offset)] as const));
     const size = (file: string) => { try { return fs.statSync(file).size; } catch { return 0; } };
-    const from = (file: string) => Math.min(saved.get(file) ?? (saved.size ? 0 : size(file)), size(file));
+    // A run recorded before read positions were kept counts from now; one recorded since counts a transcript it never read from its start.
+    const from = (file: string) => Math.min(saved.get(file) ?? (kept?.progress ? 0 : size(file)), size(file));
     let quietUntil = 0;
     try {
-      const file = this.find({ run, config: followed, claudeHome } as Watcher);
+      // The path its positions were kept under, where there is one: found again from the folder, its case could differ.
+      const known = conversation ? [...saved.keys()].find((file) => path.basename(file) === `${conversation}.jsonl` && fs.existsSync(file)) : undefined;
+      const file = known ?? this.find({ run, config: followed, claudeHome } as Watcher);
       if (file) {
         quietUntil = size(file); const subagents = new Map<string, number>();
         for (const log of subagentLogs(path.join(path.dirname(file), path.basename(file, '.jsonl'), 'subagents'))) subagents.set(log.name, from(log.file));
@@ -310,12 +316,17 @@ export class TelemetryService {
       }
     } catch { /* Found by the first read, from its start. */ }
     this.start(run, followed, claudeHome, { meta: kept, quietUntil });
+    // Told to the window once its transcript is found, as a switch followed while Trace was open is.
+    const watch = this.watches.get(run.runId); if (watch && pending && pending !== id(kept?.conversationId)) watch.following = pending;
   }
   start(run: BuiltInRunningSession, config: CLIEngineConfig, claudeHome = this.claudeHome, adopted: { meta: Record<string, unknown> | null; quietUntil: number } | null = null) {
     const kept = adopted?.meta ?? null;
     const baseline = this.baselines.get(run.runId); this.baselines.delete(run.runId);
     const watch: Watcher = { requiresThread: false, baseline: baseline?.usage ?? null, claudeHome, run, config, start: Date.now(), file: baseline?.file ?? null, offset: baseline?.offset ?? 0, partial: Buffer.alloc(0), model: config.model || baseline?.usage?.model || (typeof kept?.model === 'string' ? kept.model : '') || 'CLI default', polling: false, stopped: false, thread: null, logDir: path.join(this.root, run.runId), ...(baseline?.subagents?.size ? { subagents: new Map([...baseline.subagents].map(([name, offset]) => [name, { offset, partial: Buffer.alloc(0) }])) } : {}), ...(adopted?.quietUntil ? { quietUntil: adopted.quietUntil } : {}) };
-    if (!kept) this.database.prepare('INSERT OR REPLACE INTO metadata(run,value) VALUES(?,?)').run(run.runId, JSON.stringify({ runId: run.runId, sessionId: run.sessionId, engine: run.engine, model: watch.model, cwd: run.cwd, timestamp: new Date(watch.start).toISOString() })); this.totals.delete(run.runId);
+    // `progress`: its read positions are kept (a transcript with none was not read yet), unlike a run recorded before they were.
+    if (!kept) this.database.prepare('INSERT OR REPLACE INTO metadata(run,value) VALUES(?,?)').run(run.runId, JSON.stringify({ runId: run.runId, sessionId: run.sessionId, engine: run.engine, model: watch.model, cwd: run.cwd, timestamp: new Date(watch.start).toISOString(), ...(run.engine === 'claude' ? { progress: true } : {}) }));
+    else if (!kept.progress) this.database.prepare('UPDATE metadata SET value=? WHERE run=?').run(JSON.stringify({ ...kept, progress: true }), run.runId);
+    this.totals.delete(run.runId);
     // Where a resumed transcript and its subagents start counting for this run, kept for a restart (adopt).
     if (baseline?.file && run.engine === 'claude') try { this.reached.run(run.runId, baseline.file, baseline.offset); const folder = path.join(path.dirname(baseline.file), path.basename(baseline.file, '.jsonl'), 'subagents'); for (const [name, offset] of baseline.subagents ?? []) this.reached.run(run.runId, path.join(folder, name), offset); } catch { /* Counted from where the next read gets to. */ }
     if (run.engine === 'codex') for (const other of this.watches.values()) { if (other.run.engine === 'codex' && other.run.cwd === run.cwd && !other.stopped) { other.requiresThread = true; watch.requiresThread = true; } }
@@ -368,7 +379,7 @@ export class TelemetryService {
       if (!w.file) return;
       if (w.following) { const id = w.following; w.following = undefined; try { this.onConversation(w.run, id); } catch { /* Telling the window never stops usage. */ } }
       const conversationId = path.basename(w.file).match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i)?.[0];
-      if (conversationId) { const record = this.database.prepare('SELECT value FROM metadata WHERE run=?').get(w.run.runId); if (record) { const metadata = JSON.parse(String(record.value)); if (metadata.conversationId !== conversationId) { this.database.prepare('UPDATE metadata SET value=? WHERE run=?').run(JSON.stringify({ ...metadata, conversationId }), w.run.runId); this.totals.delete(w.run.runId); } } }
+      if (conversationId) { const record = this.database.prepare('SELECT value FROM metadata WHERE run=?').get(w.run.runId); if (record) { const metadata = JSON.parse(String(record.value)); if (metadata.conversationId !== conversationId || metadata.following === conversationId) { const { following, ...rest } = metadata; this.database.prepare('UPDATE metadata SET value=? WHERE run=?').run(JSON.stringify({ ...rest, ...(following && following !== conversationId ? { following } : {}), conversationId }), w.run.runId); this.totals.delete(w.run.runId); } } }
 
       let changed = this.ingest(w, w.file, w, false);
       // Claude Code writes subagents' (the Task tool's, a workflow's) turns to their own transcripts under the
