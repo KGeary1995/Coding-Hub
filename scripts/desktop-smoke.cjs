@@ -125,14 +125,18 @@ const { NO_DRIVE } = require('./lib/no-drive.cjs');
       return data.includes('ECHO:desktop-first') && data.includes('ECHO:desktop-second');
     });
     // Text a full-screen CLI copies (OSC 52) reaches the clipboard, lines and all, just after the person used the channel;
-    // a CLI copying on its own later does not change it.
+    // a CLI copying on its own later does not change it. This is the computer's own clipboard, so only on CI runners or
+    // when asked for (CODING_HUB_TEST_CLIPBOARD=1): never by default on a person's computer, whose clipboard it replaces.
+    const copyChecks = process.env.CI === 'true' || process.env.CODING_HUB_TEST_CLIPBOARD === '1';
     const clipboardText = () => app.evaluate(({ clipboard }) => clipboard.readText());
-    await app.evaluate(({ clipboard }) => clipboard.writeText('before'));
-    await first.locator('.xterm-helper-textarea').focus(); await page.keyboard.type('copy-lines'); await page.keyboard.press('Enter');
-    for (let i = 0; i < 50 && (await clipboardText()) === 'before'; i++) await new Promise((resolve) => setTimeout(resolve, 100));
-    assert.equal(await clipboardText(), 'first line\nsecond line');
-    await page.keyboard.type('copy-later'); await page.keyboard.press('Enter');
-    await page.waitForFunction(() => window.testEvents.filter((event) => event.type === 'data').map((event) => event.data).join('').includes('COPIED LATER'));
+    if (copyChecks) {
+      await app.evaluate(({ clipboard }) => clipboard.writeText('before'));
+      await first.locator('.xterm-helper-textarea').focus(); await page.keyboard.type('copy-lines'); await page.keyboard.press('Enter');
+      for (let i = 0; i < 50 && (await clipboardText()) === 'before'; i++) await new Promise((resolve) => setTimeout(resolve, 100));
+      assert.equal(await clipboardText(), 'first line\nsecond line');
+      await page.keyboard.type('copy-later'); await page.keyboard.press('Enter');
+      await page.waitForFunction(() => window.testEvents.filter((event) => event.type === 'data').map((event) => event.data).join('').includes('COPIED LATER'));
+    } else console.log('SKIP: clipboard copy checks (set CODING_HUB_TEST_CLIPBOARD=1, or run on CI)');
     // An agent in CH2 lists the channels and messages CH1 through Trace's channel tools (1.33.0), marked as from CH2.
     const typed = () => page.evaluate(() => window.testEvents.filter((event) => event.type === 'data').map((event) => event.data).join(''));
     await second.locator('.xterm-helper-textarea').focus(); await page.keyboard.type('channel-list'); await page.keyboard.press('Enter');
@@ -192,7 +196,7 @@ const { NO_DRIVE } = require('./lib/no-drive.cjs');
     await page.waitForFunction(() => document.querySelectorAll('.session-tile')[1]?.getAttribute('data-state') === 'done');
     assert.equal(await second.locator('.session-attention').count(), 0, 'the end of a Codex turn is not an approval request');
     await second.locator('.xterm-helper-textarea').focus(); await page.waitForFunction(() => document.querySelectorAll('.session-tile')[1]?.getAttribute('data-state') !== 'done');
-    await new Promise((resolve) => setTimeout(resolve, 300)); assert.equal(await clipboardText(), 'first line\nsecond line');
+    if (copyChecks) { await new Promise((resolve) => setTimeout(resolve, 300)); assert.equal(await clipboardText(), 'first line\nsecond line'); }
     // Trace's own menu has no Reload, Force Reload or Close Window, so Ctrl+R and Ctrl+W (Cmd on a Mac) cannot stop every
     // channel. Checked on the menu itself: Playwright's synthetic keys may never reach Electron's menu accelerators.
     const menuItems = await app.evaluate(({ Menu }) => {
