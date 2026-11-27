@@ -130,6 +130,20 @@ describe.skipIf(!hc)('herdr-core terminals, what an audit found', () => {
       } finally { again.close(); }
     } finally { first.close(); remove(cwd); }
   });
+  it('keeps a channel through a restart of hc itself: attached again, its program the same, typing still reaching it', { timeout: 60_000 }, async () => {
+    const cwd = folder(); const terminals = new HerdrTerminals(hc!);
+    try {
+      const pty = await terminals.spawn(shell.file, shell.args, { cwd, cols: 80, rows: 24, env: { ...process.env, PS1: '$ ' } as Record<string, string> }, meta(cwd));
+      let seen = ''; let exited = false; pty.onData((text) => { seen += text; }); pty.onExit(() => { exited = true; });
+      const line = (pty as unknown as { connection: unknown }).connection;
+      // hc's own planned restart (as after an update): its programs keep running, and the next core takes them up.
+      const { execFileSync } = await import('node:child_process'); execFileSync(hc!, ['server', 'restart'], { timeout: 30_000 });
+      expect(await until(() => (pty as unknown as { connection: unknown }).connection !== line, 15_000)).toBe(true);
+      pty.write('echo after-restart\r');
+      expect(await until(() => seen.includes('after-restart'), 10_000)).toBe(true); expect(exited).toBe(false);
+      pty.write('exit\r'); await until(() => exited, 10_000); expect(exited).toBe(true);
+    } finally { terminals.close(); remove(cwd); }
+  });
   it('ends a recovery that was under way when Trace lets go of hc', { timeout: 60_000 }, async () => {
     const cwd = folder(); const first = new HerdrTerminals(hc!);
     try {
