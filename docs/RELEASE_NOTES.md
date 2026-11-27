@@ -1,5 +1,10 @@
 ## What's new
 
+1.51.1 fixes the project menu under All projects.
+
+- **The open project is in the project menu again under All projects.** With All projects on, the menu left out the project that was open, so there was no way back to it from there. It is now listed first, with its channels; picking it shows only its channels again.
+- **The first update that installs itself.** If this copy runs 1.51.0, this update can install when you quit Trace (Settings → Application updates → Install a downloaded update when Trace quits), instead of through Restart and install.
+
 1.51.0 makes updates lighter: Trace downloads an update by itself and can install it when you quit.
 
 - **Updates download by themselves.** With automatic checks on (Settings → Application updates), an update Trace finds is downloaded straight away.
