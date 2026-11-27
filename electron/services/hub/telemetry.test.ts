@@ -76,6 +76,32 @@ describe('a Claude run the background runner kept while Trace was closed', () =>
       expect((again as unknown as { watches: Map<string, unknown> }).watches.size).toBe(1);
     } finally { again.close(); }
   });
+  const service = (root: string, home: string, lines: unknown[] = []) => { const telemetry = new TelemetryService(path.join(root, 'telemetry'), () => [], () => {}, () => {}, home, path.join(root, 'codex')); telemetry.onLine = (_run, _config, raw) => { lines.push(raw); }; return telemetry; };
+  it('counts a resumed conversation\'s earlier replies and subagents for it neither before nor after a restart', async () => {
+    vi.useFakeTimers(); const { root, home, dir } = setup(); const run = { runId: randomUUID(), sessionId: 's', engine: 'claude' as const, cwd: '/project', pid: 1 }; const conversation = randomUUID();
+    // A conversation made outside Trace, with a subagent: none of it is this run's.
+    const file = path.join(dir, conversation + '.jsonl'); fs.writeFileSync(file, reply('old', 300000, 1)); const agents = path.join(dir, conversation, 'subagents'); fs.mkdirSync(agents, { recursive: true }); fs.writeFileSync(path.join(agents, 'agent-old.jsonl'), reply('old-agent', 5000, 1));
+    const first = service(root, home);
+    try { first.setResumeSource(run.runId, file, 'claude', ''); first.start(run, { ...claude, resumeId: conversation } as never); fs.appendFileSync(file, reply('new', 10, 1)); vi.advanceTimersByTime(750); expect(first.runUsage(run.runId)).toMatchObject({ input: 10 }); } finally { first.close(); }
+    // While Trace was closed: one more reply, and a new subagent.
+    fs.appendFileSync(file, reply('closed', 20, 1)); fs.writeFileSync(path.join(agents, 'agent-new.jsonl'), reply('new-agent', 400, 1));
+    const lines: unknown[] = []; const again = service(root, home, lines);
+    try { again.adopt(run, claude); vi.advanceTimersByTime(5000); expect(again.runUsage(run.runId)).toMatchObject({ input: 430, output: 3, context: { used: 21 } }); expect(lines).toEqual([]); } finally { again.close(); }
+  });
+  it('after a restart, follows a conversation switch made before it, and coaches the first lines of a new transcript', async () => {
+    vi.useFakeTimers(); const { root, home, dir } = setup(); const run = { runId: randomUUID(), sessionId: 's', engine: 'claude' as const, cwd: '/project', pid: 1 }; const cleared = randomUUID();
+    fs.writeFileSync(path.join(dir, run.runId + '.jsonl'), reply('a', 100, 1));
+    const first = service(root, home);
+    // /clear just before Trace closed: the new transcript is written only with the next prompt.
+    try { first.start(run, claude); vi.advanceTimersByTime(750); first.follow(run.runId, cleared); } finally { first.close(); }
+    const lines: unknown[] = []; const again = service(root, home, lines);
+    try {
+      again.adopt(run, claude); vi.advanceTimersByTime(750); fs.writeFileSync(path.join(dir, cleared + '.jsonl'), reply('b', 7, 1)); vi.advanceTimersByTime(750);
+      expect(again.runUsage(run.runId)).toMatchObject({ input: 107, context: { used: 8 } }); expect(lines).toHaveLength(1);
+      // And after another /clear once taken up, the new transcript's lines are coached from its start.
+      const next = randomUUID(); again.follow(run.runId, next); fs.writeFileSync(path.join(dir, next + '.jsonl'), reply('c', 3, 1)); vi.advanceTimersByTime(750); expect(lines).toHaveLength(2);
+    } finally { again.close(); }
+  });
 });
 
 describe('subagents started by a workflow', () => {
