@@ -21,4 +21,13 @@ describe('ScreenReader', () => {
       expect(errors).toEqual([]);
     } finally { reader.dispose(); process.off('uncaughtException', caught); }
   }, 30_000);
+  it('knows when the program asks for bracketed paste, so a typed request goes in as one (pty-manager submitRemote)', async () => {
+    const reader = new ScreenReader('codex', 80, 24, () => '', () => {}); const terminal = (reader as unknown as { terminal: { write(data: string, callback: () => void): void } }).terminal;
+    const settled = () => new Promise<void>((resolve) => terminal.write('', resolve));
+    try {
+      expect(reader.bracketedPaste).toBe(false);
+      reader.write('\x1b[?2004h'); await settled(); expect(reader.bracketedPaste).toBe(true);
+      reader.write('\x1b[?2004l'); await settled(); expect(reader.bracketedPaste).toBe(false);
+    } finally { reader.dispose(); }
+  });
 });
