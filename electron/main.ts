@@ -46,6 +46,7 @@ import { geminiModels, ModelCatalog } from './services/cli/model-catalog';
 import { WorkspaceStorage } from './services/storage/workspace-storage';
 import { saveResume, takeResume } from './services/storage/resume-list';
 import { BackgroundRunner } from './services/runner/background';
+import { HerdrTerminals } from './services/runner/herdr';
 import { Jobs } from './services/runner/jobs';
 import { readPorts, runnerPlace, writePorts } from './services/runner/kit';
 import { ChannelTools } from './services/cli/channel-tools';
@@ -269,10 +270,13 @@ function hookEvent(event: 'needs-you' | 'turn-ended' | 'failed' | 'started' | 's
  * The background runner (docs/background-runner.md): terminal channels run in it, so they keep running after Trace quits
  * or fails, and Trace takes them up again when it opens. On in the installed app unless turned off in Settings;
  * CODING_HUB_RUNNER=1 turns it on for a source run or a smoke test, CODING_HUB_NO_RUNNER=1 off.
+ * Trial: CODING_HUB_HERDR=<absolute path to hc> holds them in herdr-core instead (runner/herdr.ts); only from the
+ * environment Trace starts with, never from the window.
  */
-let background: BackgroundRunner | null = null;
-function runnerOn() { if (process.env.CODING_HUB_NO_RUNNER) return false; return process.env.CODING_HUB_RUNNER === '1' || (app.isPackaged && hub?.preferences().backgroundRunner !== false); }
-function runner() { if (!runnerOn()) return null; if (!background) { background = new BackgroundRunner(storageRoot, app.getAppPath(), process.execPath); background.meta = (meta) => ({ attention: attention.token(meta.session.runId), tools: channelTools.token(meta.session.runId) }); background.onProblem = (message) => reportStorageError(message); } return background; }
+let background: BackgroundRunner | HerdrTerminals | null = null;
+const herdrCore = () => { const hc = process.env.CODING_HUB_HERDR; return hc && path.isAbsolute(hc) && fs.existsSync(hc) ? hc : null; };
+function runnerOn() { if (process.env.CODING_HUB_NO_RUNNER) return false; return Boolean(herdrCore()) || process.env.CODING_HUB_RUNNER === '1' || (app.isPackaged && hub?.preferences().backgroundRunner !== false); }
+function runner() { if (!runnerOn()) return null; if (!background) { const hc = herdrCore(); background = hc ? new HerdrTerminals(hc) : new BackgroundRunner(storageRoot, app.getAppPath(), process.execPath); background.meta = (meta) => ({ attention: attention.token(meta.session.runId), tools: channelTools.token(meta.session.runId) }); background.onProblem = (message) => reportStorageError(message); } return background; }
 /**
  * Windows job objects for the channels Trace runs itself (chats, and terminals with the runner off), through the same
  * helper as the runner's (dist-electron/native/trace-jobs.exe), started the first time a channel starts.
