@@ -85,7 +85,7 @@ import { TelemetryService } from './services/hub/telemetry';
 import { AutoMemory, projectMemoryKey } from './services/hub/auto-memory';
 import { GEMINI_PLUGIN, GEMINI_TOOL_RULES, geminiConfigRoot, geminiPluginOff, installGeminiPlugin } from './services/hub/gemini-plugin';
 import { setBackupRoot } from './services/hub/file-backups';
-import { isAgentConfig, isBuiltInAgent, isChatEngineConfig, isChatRun, SUBMIT_DELAY_MS } from '../shared/types';
+import { isAgentConfig, isBuiltInAgent, isChatEngineConfig, isChatRun } from '../shared/types';
 import { CustomAgents } from './services/agents/agents';
 import { buildAcpLaunch, buildCustomLaunch, takesTools, type McpServer } from './services/agents/launch';
 import { AGENT_ID } from '../shared/agent-definition';
@@ -183,7 +183,7 @@ function channelReplies(sessionId: string, count: number) { return (channelTrans
 async function sendToChannel(sessionId: string, text: string) {
   const run = manager.running().find((item) => item.sessionId === sessionId); if (!run) throw new HubError('CHANNEL_TOOLS_STOPPED', 'That channel is not running.');
   // A Round Table's lead passes it to the table, as a message typed there does (1.33.2; before, the lead alone got it).
-  if (workspaceChannels().find((session) => session.id === sessionId)?.chat) manager.chatRemote({ action: manager.leadsTable(run.runId) ? 'table-send' : 'send', sessionId, runId: run.runId, text, images: [] }); else { manager.writeRemote({ sessionId, runId: run.runId }, text); await new Promise((resolve) => setTimeout(resolve, SUBMIT_DELAY_MS)); manager.writeRemote({ sessionId, runId: run.runId }, '\r'); }
+  if (workspaceChannels().find((session) => session.id === sessionId)?.chat) manager.chatRemote({ action: manager.leadsTable(run.runId) ? 'table-send' : 'send', sessionId, runId: run.runId, text, images: [] }); else await manager.submitRemote({ sessionId, runId: run.runId }, text);
 }
 /** What a plugin action is about (docs/plugins.md, section 3): the project, the channel it was asked on, its folder and branch. */
 function pluginContext(sessionId?: string, repository?: string): PluginContext {

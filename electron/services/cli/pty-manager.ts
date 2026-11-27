@@ -9,7 +9,7 @@ import type { IPty, IPtyForkOptions } from 'node-pty';
 import type { AgentConfig, ChannelConfig, CLIEngineConfig, CustomChannelConfig, PermissionLevel, SeatEngine } from '../../../shared/types';
 import type { AgentDefinition } from '../../../shared/agent-definition';
 import { CustomStatusReader, type CustomStatusChange } from '../agents/status';
-import { isAgentConfig, isBuiltInAgent, isChatEngineConfig, isChatRun } from '../../../shared/types';
+import { isAgentConfig, isBuiltInAgent, isChatEngineConfig, isChatRun, submitDelay, typedRequest } from '../../../shared/types';
 import type { AgentRunningSession, BuiltInRunningSession, RunningSession, RunReference, SessionEvent, EngineInfo } from '../../../shared/ipc';
 import { isPersonInput } from '../../../shared/terminal-input';
 import { MAX_CHANNELS, ackSessionSchema, chatRequestSchema, resizeSessionSchema, runReferenceSchema, startSessionSchema, writeSessionSchema } from '../../../shared/schemas';
@@ -257,6 +257,16 @@ export class PtyManager {
    * Input typed on a paired phone. It reaches the run by its reference rather than through the owning window, and tells
    * that window the person answered, so a waiting prompt clears on the desktop too.
    */
+  /**
+   * Types a request into a terminal run and presses Enter, as the person would: a bracketed paste when the program asked
+   * for one (Claude Code and Codex runs keep a screen that knows), else as keys with a pause that grows with its length.
+   */
+  async submitRemote(reference: RunReference, text: string) {
+    const bracketed = Boolean(this.runs.get(reference.sessionId)?.screen?.bracketedPaste);
+    this.writeRemote(reference, typedRequest(text, bracketed));
+    await new Promise((resolve) => setTimeout(resolve, submitDelay(text, bracketed)));
+    this.writeRemote(reference, '\r');
+  }
   writeRemote(reference: RunReference, data: string) {
     const run = this.runs.get(reference.sessionId);
     if (!run || run.finished || run.session.runId !== reference.runId) throw new HubError('STALE_SESSION', 'This process has ended or the channel reference is stale.');

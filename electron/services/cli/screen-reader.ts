@@ -17,6 +17,8 @@ export class ScreenReader {
     this.timer = setInterval(() => this.check(), 700); this.timer.unref?.();
   }
   write(data: string) { this.terminal.write(data); this.wrote = Date.now(); }
+  /** Whether the program asked for bracketed paste (typedRequest): what it wrote last that the screen has taken in. */
+  get bracketedPaste() { return this.terminal.modes.bracketedPasteMode; }
   /** When the run last wrote anything. */
   get wroteAt() { return this.wrote; }
   resize(cols: number, rows: number) { this.terminal.write('', () => { if (cols !== this.terminal.cols || rows !== this.terminal.rows) this.terminal.resize(cols, rows); }); }
