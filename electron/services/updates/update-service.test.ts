@@ -7,16 +7,18 @@ import { UpdateService, updatesEnabled } from './update-service';
 
 const directories: string[] = [];
 class FakeUpdater extends EventEmitter {
-  autoDownload = true; autoInstallOnAppQuit = true; allowPrerelease = true; allowDowngrade = true;
+  autoDownload = true; autoInstallOnAppQuit = true; allowPrerelease = true; allowDowngrade = true; autoRunAppAfterInstall = true;
   checkForUpdates = vi.fn(async () => { this.emit('update-available', { version: '1.3.0' }); });
-  downloadUpdate = vi.fn(async () => { this.emit('download-progress', { percent: 51 }); this.emit('update-downloaded', { version: '1.3.0' }); });
+  /** Whether electron-updater would add its quit handler: it does when a download ends, only while autoInstallOnAppQuit is on. */
+  quitHandler = false;
+  downloadUpdate = vi.fn(async () => { this.emit('download-progress', { percent: 51 }); this.emit('update-downloaded', { version: '1.3.0' }); this.quitHandler ||= this.autoInstallOnAppQuit; });
   quitAndInstall = vi.fn();
 }
-function fixture(enabled = true) {
+function fixture(enabled = true, platform = 'win32') {
   const directory = mkdtempSync(path.join(tmpdir(), 'hub-updates-')); directories.push(directory);
   const updater = new FakeUpdater();
   const publish = vi.fn(); const hasSessions = vi.fn(() => false); const prepareRestart = vi.fn(async () => true);
-  const dependencies = { installationFailed: vi.fn(), version: '1.2.0', enabled, disabledReason: 'Installed Windows edition required.', storageDirectory: directory, updater, publish, hasSessions, prepareRestart };
+  const dependencies = { installationFailed: vi.fn(), version: '1.2.0', enabled, disabledReason: 'Installed Windows edition required.', storageDirectory: directory, platform, updater, publish, hasSessions, prepareRestart };
   const service = new UpdateService(dependencies);
   return { service, updater, publish, hasSessions, prepareRestart, directory, dependencies };
 }
@@ -36,7 +38,9 @@ describe('Windows update lifecycle', () => {
   });
   it('keeps checking on schedule while a found update waits to be downloaded, so a newer one is noticed', async () => {
     vi.useFakeTimers(); const { service, updater } = fixture();
-    service.start(); await vi.advanceTimersByTimeAsync(30_000); expect(service.status().phase).toBe('available');
+    // Its download failed (no connection, say): the next check still comes.
+    updater.downloadUpdate.mockImplementation(async () => { updater.emit('error', new Error('offline')); });
+    service.start(); await vi.advanceTimersByTimeAsync(30_000); expect(service.status()).toMatchObject({ phase: 'error', availableVersion: '1.3.0' });
     await vi.advanceTimersByTimeAsync(4 * 60 * 60 * 1000); expect(updater.checkForUpdates).toHaveBeenCalledTimes(2); service.close();
   });
   it('says so when a linked computer asks and it is already up to date', async () => {
@@ -44,9 +48,9 @@ describe('Windows update lifecycle', () => {
     expect(await service.remoteInstall()).toMatch(/already the latest/); expect(updater.downloadUpdate).not.toHaveBeenCalled();
     await expect(fixture(false).service.remoteInstall()).rejects.toMatchObject({ code: 'UPDATES_DISABLED' });
   });
-  it('checks stable releases, explicitly downloads and restarts; never installs on normal quit', async () => {
+  it('checks stable releases, explicitly downloads and restarts', async () => {
     const { service, updater, publish } = fixture();
-    expect(updater.autoDownload).toBe(false); expect(updater.autoInstallOnAppQuit).toBe(false);
+    expect(updater.autoDownload).toBe(false);
     expect(updater.allowPrerelease).toBe(false); expect(updater.allowDowngrade).toBe(false);
     expect((await service.execute({ action: 'check' })).phase).toBe('available');
     expect(updater.downloadUpdate).not.toHaveBeenCalled();
@@ -102,6 +106,48 @@ describe('Windows update lifecycle', () => {
     const pending = service.execute({ action: 'check' });
     await expect(service.execute({ action: 'check' })).rejects.toMatchObject({ code: 'UPDATE_BUSY' });
     updater.emit('update-available', { version: '1.3.0' }); resolve(); await pending;
+  });
+  it('downloads what an automatic check finds, so it is ready to install', async () => {
+    vi.useFakeTimers(); const { service, updater } = fixture();
+    service.start(); await vi.advanceTimersByTimeAsync(30_000);
+    expect(updater.downloadUpdate).toHaveBeenCalledTimes(1); expect(service.status()).toMatchObject({ phase: 'ready', message: 'Update downloaded. It installs when you quit Trace, or restart now to install it.' }); service.close();
+  });
+  it('on Windows, installs a downloaded update when Trace quits, unless turned off or something was left running', async () => {
+    const { service, updater, directory, dependencies } = fixture();
+    // Before anything is downloaded, quitting installs nothing.
+    expect(updater.autoInstallOnAppQuit).toBe(false); expect(service.quitting({ safe: true, kept: true })).toBe(false); expect(updater.autoInstallOnAppQuit).toBe(false);
+    await service.execute({ action: 'check' }); await service.execute({ action: 'download' });
+    // The quit handler is added, but any quit other than Trace's own (a second one while it shuts down) installs nothing.
+    expect(updater.quitHandler).toBe(true); expect(updater.autoInstallOnAppQuit).toBe(false);
+    // Channels kept in the background runner do not hold it back on Windows; the updater's own quit handler installs.
+    expect(service.quitting({ safe: true, kept: true })).toBe(false); expect(updater.autoInstallOnAppQuit).toBe(true); expect(updater.quitAndInstall).not.toHaveBeenCalled();
+    expect(service.quitting({ safe: false, kept: false })).toBe(false); expect(updater.autoInstallOnAppQuit).toBe(false);
+    expect((await service.execute({ action: 'install-on-quit', enabled: false })).message).toBe('Update downloaded. Stop all channels, then restart to install.');
+    expect(service.quitting({ safe: true, kept: false })).toBe(false); expect(updater.autoInstallOnAppQuit).toBe(false);
+    expect(JSON.parse(readFileSync(path.join(directory, 'updates.json'), 'utf8'))).toEqual({ automaticChecks: true, installOnQuit: false });
+    expect(new UpdateService(dependencies).status().installOnQuit).toBe(false);
+  });
+  it('on Windows, installs on quit when the setting is turned on only after the download (the quit handler is added at download)', async () => {
+    const { updater, directory, dependencies } = fixture(); writeFileSync(path.join(directory, 'updates.json'), JSON.stringify({ automaticChecks: true, installOnQuit: false }));
+    const off = new UpdateService(dependencies);
+    await off.execute({ action: 'check' }); await off.execute({ action: 'download' }); expect(updater.quitHandler).toBe(true); expect(updater.autoInstallOnAppQuit).toBe(false);
+    await off.execute({ action: 'install-on-quit', enabled: true }); off.quitting({ safe: true, kept: false }); expect(updater.autoInstallOnAppQuit).toBe(true);
+  });
+  it('on a Mac, installs on quit only with no channels kept running, and never through Squirrel on any quit', async () => {
+    const { service, updater } = fixture(true, 'darwin');
+    expect(updater.autoInstallOnAppQuit).toBe(false);
+    await service.execute({ action: 'check' }); await service.execute({ action: 'download' });
+    expect(service.status().message).toBe('Update downloaded. It installs when you quit Trace with no channels left running, or restart now to install it.');
+    expect(service.quitting({ safe: true, kept: true })).toBe(false); expect(updater.quitAndInstall).not.toHaveBeenCalled();
+    const giveUp = vi.fn(); expect(service.quitting({ safe: true, kept: false, giveUp })).toBe(true); expect(updater.autoRunAppAfterInstall).toBe(false); expect(updater.quitAndInstall).toHaveBeenCalledTimes(1);
+    // Opened again meanwhile: it opens on the new version once installed.
+    expect(service.reopenAfterInstall()).toBe(true); expect(updater.autoRunAppAfterInstall).toBe(true);
+    // Squirrel failed: Trace quits at once instead of waiting.
+    updater.emit('error', new Error('read-only volume')); expect(giveUp).toHaveBeenCalledTimes(1); expect(service.reopenAfterInstall()).toBe(false);
+  });
+  it('reads a preferences file saved before install on quit existed', () => {
+    const { directory, dependencies } = fixture(); writeFileSync(path.join(directory, 'updates.json'), JSON.stringify({ automaticChecks: false }));
+    expect(new UpdateService(dependencies).status()).toMatchObject({ automaticChecks: false, installOnQuit: true });
   });
   it('persists automatic-check preference and stops scheduled checks when disabled', async () => {
     vi.useFakeTimers();

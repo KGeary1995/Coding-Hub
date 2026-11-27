@@ -296,6 +296,8 @@ export class PtyManager {
   get hasSessions(): boolean { return this.runs.size > 0 || this.pending.size > 0; }
   /** Runs an update would stop: all but those in the background runner, which an update leaves running. */
   get hasLocalSessions(): boolean { return [...this.runs.values()].some((run) => !run.held) || this.pending.size > 0; }
+  /** Channels in the background runner, which keep running when Trace quits (unless stopped); a start still on its way may become one. */
+  get hasHeldSessions(): boolean { return [...this.runs.values()].some((run) => run.held && !run.finished) || this.pending.size > 0; }
   /** Every process still running, whichever window owns it: what quitting would leave behind. */
   processIds(): number[] { return [...this.runs.values()].map((run) => run.session.pid); }
   /** Undoes dispose() when the person cancels quitting, so channels can start again. */
